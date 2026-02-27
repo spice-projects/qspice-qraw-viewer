@@ -1,0 +1,70 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Viewer - 10_DC",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "viewer",
+            "console": "integratedTerminal",
+            "args": ["tests/PyQSPICE/UJ3N065080.qraw", "--log-level=DEBUG"]
+        },
+        {
+            "name": "Viewer - 20_AC",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "viewer",
+            "console": "integratedTerminal",
+            "args": ["tests/PyQSPICE/VRM_GainBW.qraw", "--log-level=DEBUG"]
+        },
+        {
+            "name": "Viewer - 22_NyquistDia",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "viewer",
+            "console": "integratedTerminal",
+            "args": ["tests/PyQSPICE/VRM_Nyquist.qraw", "--log-level=DEBUG"]
+        },
+        {
+            "name": "Viewer - 30_TRAN",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "viewer",
+            "console": "integratedTerminal",
+            "args": ["tests/PyQSPICE/Buck_COT_TRAN.qraw", "--log-level=DEBUG"]
+        },
+        {
+            "name": "Viewer - 40_Bode",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "viewer",
+            "console": "integratedTerminal",
+            "args": ["tests/PyQSPICE/Buck_COT_Bode.qraw", "--log-level=DEBUG"]
+        },
+        {
+            "name": "Viewer - 50_OP",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "viewer",
+            "console": "integratedTerminal",
+            "args": ["tests/PyQSPICE/op.qraw", "--log-level=DEBUG"]
+        },
+        {
+            "name": "Viewer - 70_VerilogBus",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "viewer",
+            "console": "integratedTerminal",
+            "args": ["tests/PyQSPICE/VerilogBus.qraw", "--log-level=DEBUG"]
+        },
+
+        {
+            "name": "Viewer",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "viewer",
+            "console": "integratedTerminal",
+            "args": ["test.qraw", "--log-level=DEBUG"]
+        }
+    ]
+}
