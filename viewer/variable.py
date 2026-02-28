@@ -30,7 +30,7 @@ class VariableType(Enum):
 
 class Variable:
 
-    def __init__(self, index: int, name: str, type: VariableType, values: np.ndarray, steps: int = 1, magnitude: Variable | None = None, phase: Variable | None = None):
+    def __init__(self, index: int, name: str, type: VariableType, values: np.ndarray, steps: int = 1, magnitude = None, phase = None):
         # fields
         self._index = index
         self._name = name
@@ -79,7 +79,7 @@ class Variable:
         return self.values[step * self._step_length: (step + 1) * self._step_length]
 
     @property
-    def magnitude(self) -> Variable:
+    def magnitude(self) -> "Variable":
         # variable must be complex
         if self._values.dtype != np.complex128:
             raise ValueError("cannot calculate magnitude of a non-complex variable")
@@ -91,7 +91,7 @@ class Variable:
         return self._magnitude
 
     @property
-    def phase(self) -> Variable:
+    def phase(self) -> "Variable":
         # variable must be complex
         if self._values.dtype != np.complex128:
             raise ValueError("cannot calculate phase of a non-complex variable")

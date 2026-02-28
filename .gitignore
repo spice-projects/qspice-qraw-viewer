@@ -80,5 +80,8 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 /build*/
+dist
 
 *.egg-info
+.coverage
+coverage.xml

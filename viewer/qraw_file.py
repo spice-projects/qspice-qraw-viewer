@@ -106,7 +106,7 @@ def _chart_type_for_mode(mode: str) -> ChartTypeSpec | None:
     return _MODE_TO_CHART.get(mode.lower())
 
 
-def chart_type_for_file(qraw_file: QRawFile) -> ChartTypeSpec:
+def chart_type_for_file(qraw_file) -> ChartTypeSpec:
     """Return the correct chart type for a loaded file based on the X axis variable type."""
     # variables list must not be empty
     if not qraw_file.variables:
@@ -267,7 +267,7 @@ class QRawFile:
         return plot_suggestions
 
     @staticmethod
-    def load(filename: str | Path) -> "QRawFile" | None:
+    def load(filename: str | Path):
         # load file
         path = Path(filename)
         if not path.exists():

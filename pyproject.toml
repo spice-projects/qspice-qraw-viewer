@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "qspice-qraw-viewer"
 version = "0.1.0"
-description = "QSPICE .qraw waveform viewer"
+description = "QSPICE QRAW Waveform Viewer"
 requires-python = ">=3.12"
 dependencies = [
     "numpy",
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-qraw-viewer = "viewer.__main__:main"
+qspice-qraw-viewer = "viewer.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["viewer*"]
