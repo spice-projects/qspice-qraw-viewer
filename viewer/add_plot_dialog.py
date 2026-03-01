@@ -3,7 +3,6 @@ from pathlib import Path
 
 from PySide6.QtCore import QUrl, Qt, Slot
 from PySide6.QtGui import QColor
-from PySide6.QtQml import QJSValue
 from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 

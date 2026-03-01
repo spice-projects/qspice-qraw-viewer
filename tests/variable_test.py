@@ -1,10 +1,11 @@
-import unittest
+from unittest import TestCase
 
 import numpy as np
 
 from viewer.variable import Variable, VariableType
 
-class TestVariable(unittest.TestCase):
+
+class TestVariable(TestCase):
 
     def test_index(self):
         # arrange
@@ -100,7 +101,7 @@ class TestVariable(unittest.TestCase):
         np.testing.assert_array_equal(step1_real, np.array([3.0, 4.0]))
         np.testing.assert_array_equal(step0_complex, np.array([1+2j, 3+4j]))
         np.testing.assert_array_equal(step1_complex, np.array([5+6j, 7+8j]))
-        # act & assert
+        # assert
         with self.assertRaises(IndexError):
             var_real.step_values(-1)
         with self.assertRaises(IndexError):
@@ -119,7 +120,7 @@ class TestVariable(unittest.TestCase):
         self.assertEqual(mag.name, "abs(Iin)")
         self.assertEqual(mag.type, VariableType.CURRENT)
         self.assertEqual(mag.steps, 2)
-        # act & assert
+        # assert
         with self.assertRaises(ValueError):
             _ = var_real.magnitude
 
@@ -136,6 +137,6 @@ class TestVariable(unittest.TestCase):
         self.assertEqual(phase.name, "angle(Iin)")
         self.assertEqual(phase.type, VariableType.PHASE)
         self.assertEqual(phase.steps, 2)
-        # act & assert
+        # assert
         with self.assertRaises(ValueError):
             _ = var_real.phase
