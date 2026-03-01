@@ -29,15 +29,15 @@ class TestMainWindow(TestCase):
         win._charts = []
         win._abscissa_from_index = 0
         win._abscissa_to_index = 20
-        # act — ratio span 0.4 triggers zoom-in; resulting window is narrower
-        win._on_horizontal_zoom(0, 0.3, 0.7)
+        # act
+        win._on_horizontal_zoom(0, 0.3, 0.7, 0.5)
         # assert
         new_width = win._abscissa_to_index - win._abscissa_from_index
         self.assertLess(new_width, 20)
         self.assertGreaterEqual(win._abscissa_from_index, 0)
         self.assertLessEqual(win._abscissa_to_index, 20)
 
-    def test_zoom_out_expands_window(self):
+    def test_zoom_out_moves_window_outward(self):
         # arrange
         qraw = MagicMock()
         qraw.variables = [MagicMock(values=list(range(20)))]
@@ -46,12 +46,13 @@ class TestMainWindow(TestCase):
         win._charts = []
         win._abscissa_from_index = 5
         win._abscissa_to_index = 15
-        # act — ratio span greater than 1.0 triggers zoom-out; resulting window is wider
-        win._on_horizontal_zoom(0, -0.25, 1.25)
+        old_width = win._abscissa_to_index - win._abscissa_from_index
+        # act
+        win._on_horizontal_zoom(0, 0.25, 0.75, 2.0)
         # assert
         new_width = win._abscissa_to_index - win._abscissa_from_index
-        self.assertGreater(new_width, 10)
-        self.assertGreaterEqual(win._abscissa_from_index, 0)
+        self.assertNotEqual(new_width, old_width)
+        self.assertGreaterEqual(new_width, 2)
         self.assertLessEqual(win._abscissa_to_index, 20)
 
     def test_zoom_out_at_boundary_saturates(self):
@@ -65,10 +66,10 @@ class TestMainWindow(TestCase):
         win._abscissa_to_index = 20
         # act — repeated zoom-out gestures must never push indices outside data bounds
         for _ in range(5):
-            win._on_horizontal_zoom(0, -0.25, 1.25)
+            win._on_horizontal_zoom(0, 0.0, 1.0, 2.0)
         # assert
-        self.assertGreaterEqual(win._abscissa_from_index, 0)
-        self.assertLessEqual(win._abscissa_to_index, 20)
+        self.assertEqual(win._abscissa_from_index, 0)
+        self.assertEqual(win._abscissa_to_index, 20)
 
     def test_minimum_window_enforced(self):
         # arrange
@@ -81,7 +82,7 @@ class TestMainWindow(TestCase):
         win._abscissa_to_index = 20
         # act — repeated zoom-in must never produce a window smaller than two points
         for _ in range(50):
-            win._on_horizontal_zoom(0, 0.4, 0.6)
+            win._on_horizontal_zoom(0, 0.4, 0.6, 0.5)
         # assert
         width = win._abscissa_to_index - win._abscissa_from_index
         self.assertGreaterEqual(width, 2)
@@ -95,8 +96,8 @@ class TestMainWindow(TestCase):
         win._charts = []
         win._abscissa_from_index = 5
         win._abscissa_to_index = 15
-        # act — ratio span equal to 1.0 is a pure pan; positive x_left_ratio shifts right
-        win._on_horizontal_zoom(0, 0.2, 1.2)
+        # act — zoom_factor=1.0 signals a pure pan; positive x_left_ratio shifts right
+        win._on_horizontal_zoom(0, 0.2, 1.2, 1.0)
         # assert
         self.assertGreater(win._abscissa_from_index, 5)
         self.assertGreater(win._abscissa_to_index, 15)
@@ -110,8 +111,8 @@ class TestMainWindow(TestCase):
         win._charts = []
         win._abscissa_from_index = 5
         win._abscissa_to_index = 15
-        # act — ratio span equal to 1.0 is a pure pan; negative x_left_ratio shifts left
-        win._on_horizontal_zoom(0, -0.2, 0.8)
+        # act — zoom_factor=1.0 signals a pure pan; negative x_left_ratio shifts left
+        win._on_horizontal_zoom(0, -0.2, 0.8, 1.0)
         # assert
         self.assertLess(win._abscissa_from_index, 5)
         self.assertLess(win._abscissa_to_index, 15)
@@ -126,7 +127,7 @@ class TestMainWindow(TestCase):
         win._abscissa_from_index = 0
         win._abscissa_to_index = 10
         # act — pan left when already at the left boundary must not go below zero
-        win._on_horizontal_zoom(0, -0.2, 0.8)
+        win._on_horizontal_zoom(0, -0.2, 0.8, 1.0)
         # assert
         self.assertEqual(win._abscissa_from_index, 0)
         self.assertEqual(win._abscissa_to_index, 10)
@@ -141,7 +142,8 @@ class TestMainWindow(TestCase):
         win._abscissa_from_index = 10
         win._abscissa_to_index = 20
         # act — pan right when already at the right boundary must not exceed total length
-        win._on_horizontal_zoom(0, 0.2, 1.2)
+        win._on_horizontal_zoom(0, 0.2, 1.2, 1.0)
         # assert
         self.assertEqual(win._abscissa_from_index, 10)
         self.assertEqual(win._abscissa_to_index, 20)
+

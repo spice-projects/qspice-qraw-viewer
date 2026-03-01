@@ -102,7 +102,7 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.abscissa_min, 1.0e+00)
         self.assertEqual(qraw.abscissa_max, 1.0e+08)
         self.assertEqual(qraw.abscissa_scale, AbscissaScale.DECADE)
-        # assert default variables (expression V(VOUT)/V(VO) is skipped — group has no resolved variables)
+        # assert default variables
         self.assertEqual(len(qraw.plot_suggestions), 1)
         self.assertIs(qraw.plot_suggestions[0].chart_type, AC)
         self.assertEqual(qraw.plot_suggestions[0].variables, [])
@@ -138,7 +138,7 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.abscissa_min, 0.0)
         self.assertEqual(qraw.abscissa_max, 1.0e-03)
         self.assertEqual(qraw.abscissa_scale, AbscissaScale.LINEAR)
-        # assert default variables — three «...» groups each become their own PlotSuggestion
+        # assert default variables
         self.assertEqual(len(qraw.plot_suggestions), 3)
         self.assertIs(qraw.plot_suggestions[0].chart_type, TRANSIENT)
         self.assertEqual([v.name for v in qraw.plot_suggestions[0].variables], ["V(out)", "V(ss)", "V(in)"])
@@ -175,7 +175,7 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.abscissa_min, 1.0e+03)
         self.assertEqual(qraw.abscissa_max, 1.0e+05)
         self.assertEqual(qraw.abscissa_scale, AbscissaScale.OCTAVE)
-        # assert default variables to plot (no mode keyword — inferred from FREQUENCY x-axis → AC)
+        # assert default variables to plot
         self.assertEqual(len(qraw.plot_suggestions), 1)
         self.assertIs(qraw.plot_suggestions[0].chart_type, AC)
         self.assertEqual([v.name for v in qraw.plot_suggestions[0].variables], ["OpenLoopGain"])
@@ -211,7 +211,7 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.abscissa_min, 1.0e-15)
         self.assertEqual(qraw.abscissa_max, 1.0e-06)
         self.assertEqual(qraw.abscissa_scale, AbscissaScale.OCTAVE)
-        # assert default variables — two «...» groups each become their own PlotSuggestion
+        # assert default variables
         self.assertEqual(len(qraw.plot_suggestions), 2)
         self.assertIs(qraw.plot_suggestions[0].chart_type, DC)
         self.assertEqual([v.name for v in qraw.plot_suggestions[0].variables], ["V(vf1)", "I(D1)"])
@@ -248,7 +248,7 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.abscissa_min, 0.0)
         self.assertEqual(qraw.abscissa_max, 2.0e-05)
         self.assertEqual(qraw.abscissa_scale, AbscissaScale.LINEAR)
-        # assert default variables — five «tran ...» groups each become their own PlotSuggestion
+        # assert default variables
         self.assertEqual(len(qraw.plot_suggestions), 5)
         self.assertIs(qraw.plot_suggestions[0].chart_type, TRANSIENT)
         self.assertEqual([v.name for v in qraw.plot_suggestions[0].variables], ["V(outd[3])"])
