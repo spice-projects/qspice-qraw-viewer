@@ -118,9 +118,12 @@ Item {
                 labelsVisible: true
                 titleVisible: false
                 titleText: ""
+                alignment: Qt.AlignHCenter
 
                 labelDelegate: Item {
+
                     property string text: ""
+                    
                     Text {
                         anchors.fill: parent
                         color: "#b0b8c8"
@@ -145,13 +148,17 @@ Item {
             ValueAxis {
                 id: axisYLeft1
                 lineVisible: true
-                titleVisible: false
                 labelsVisible: true
+                titleVisible: false
                 titleText: ""
                 alignment: Qt.AlignLeft
+
                 property string yUnit: ""
+
                 labelDelegate: Item {
+
                     property string text: ""
+
                     Text {
                         anchors.fill: parent
                         color: "#b0b8c8"
@@ -166,13 +173,17 @@ Item {
             ValueAxis {
                 id: axisYLeft2
                 lineVisible: true
-                titleVisible: false
                 labelsVisible: true
+                titleVisible: false
                 titleText: ""
                 alignment: Qt.AlignLeft
+
                 property string yUnit: ""
+
                 labelDelegate: Item {
+
                     property string text: ""
+
                     Text {
                         anchors.fill: parent
                         color: "#b0b8c8"
@@ -187,13 +198,17 @@ Item {
             ValueAxis {
                 id: axisYRight1
                 lineVisible: true
-                titleVisible: false
                 labelsVisible: true
+                titleVisible: false
                 titleText: ""
                 alignment: Qt.AlignRight
+
                 property string yUnit: ""
+
                 labelDelegate: Item {
+
                     property string text: ""
+
                     Text {
                         anchors.fill: parent
                         color: "#b0b8c8"
@@ -208,13 +223,17 @@ Item {
             ValueAxis {
                 id: axisYRight2
                 lineVisible: true
-                titleVisible: false
                 labelsVisible: true
+                titleVisible: false
                 titleText: ""
                 alignment: Qt.AlignRight
+
                 property string yUnit: ""
+
                 labelDelegate: Item {
+
                     property string text: ""
+                    
                     Text {
                         anchors.fill: parent
                         color: "#b0b8c8"
@@ -257,18 +276,24 @@ Item {
             }
 
             function decadeValueFormatter(unit, text) {
+                // parse value
                 var value = parseFloat(text)
                 if (isNaN(value))
                     return text
+                // calculate actual value from decade exponent
                 var actual = Math.pow(10, value)
+                // unit
                 return applyUnit(unit, text, actual)
             }
 
             function octaveValueFormatter(unit, text) {
+                // parse value
                 var value = parseFloat(text)
                 if (isNaN(value))
                     return text
+                // calculate actual value from octave exponent
                 var actual = Math.pow(2, value)
+                // unit
                 return applyUnit(unit, text, actual)
             }
         }
@@ -449,31 +474,6 @@ Item {
         }
 
         function plotSeries(seriesToAdd, seriesToRemove) {
-            // loop series to remove
-            for (var i = 0; i < seriesToRemove.length; i++) {
-                // current
-                const current = seriesToRemove[i]
-                // series name & data
-                const name = current[0]
-                const data = current[1]
-                // loop series lines
-                for (var j = 0; j < data.length; j++) {
-                    // series
-                    const series = data[j]
-                    // remove from chart
-                    graphsView.removeSeries(series)
-                }
-                // loop legend entries
-                for (var j = 0; j < legendModel.count; j++) {
-                    // compare name to find the matching legend entry to remove
-                    if (legendModel.get(j).seriesName === name) {
-                        // remove legend entry with matching name
-                        legendModel.remove(j)
-                        // exit loop
-                        break
-                    }
-                }
-            }
             // loop series, multiple added in batch
             for (var i = 0; i < seriesToAdd.length; i++) {
                 // current series in loop
@@ -498,8 +498,36 @@ Item {
                 // append legend entry with the same color
                 legendModel.append({ seriesName: name, seriesColor: seriesColor })
             }
-            // reveal the legend after a short delay so the chart has time to paint first
-            legendRevealTimer.restart()
+            // loop series to remove
+            for (var i = 0; i < seriesToRemove.length; i++) {
+                // current
+                const current = seriesToRemove[i]
+                // series name & data
+                const name = current[0]
+                const data = current[1]
+                // loop series lines
+                for (var j = data.length - 1; j >= 0; j--) {
+                    // series
+                    const series = data[j]
+                    // remove from chart
+                    graphsView.removeSeries(series)
+                }
+                // loop legend entries
+                for (var j = legendModel.count - 1; j >= 0; j--) {
+                    // compare name to find the matching legend entry to remove
+                    if (legendModel.get(j)["seriesName"] === name) {
+                        // remove legend entry with matching name
+                        legendModel.remove(j)
+                        // exit loop
+                        break
+                    }
+                }
+            }
+            // reveal the legend the first time we plot series
+            if (!panel.legendVisible) {
+                // reveal the legend after a short delay so the chart has time to paint first
+                legendRevealTimer.restart()
+            }
         }
 
         function removeAllSeries() {

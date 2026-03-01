@@ -1,11 +1,10 @@
 import logging
 from pathlib import Path
 
-import numpy as np
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QAction, QKeySequence
 from PySide6.QtQuick import QQuickView
-from PySide6.QtWidgets import QMainWindow, QWidget
+from PySide6.QtWidgets import QMainWindow, QWidget, QFileDialog
 
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
@@ -44,6 +43,8 @@ class MainWindow(QMainWindow):
         # embed the single QWindow into the main window's central area
         self._container = QWidget.createWindowContainer(self._qml_view, self)
         self.setCentralWidget(self._container)
+        # create the native main menu structure
+        self._create_main_menu()
         # decimation target — physical pixels of the primary screen width
         screen = QGuiApplication.primaryScreen()
         self._decimate_target = screen.size().width() * max(5, int(screen.devicePixelRatio()))
@@ -71,6 +72,51 @@ class MainWindow(QMainWindow):
         # populate charts after the event loop starts so the window is visible first
         QTimer.singleShot(0, self._populate_charts)
 
+    def _create_main_menu(self):
+        # menu bar
+        menuBar = self.menuBar()
+
+        # File menu
+        file_menu = menuBar.addMenu("&File")
+        # File | Open
+        open_action = QAction("&Open...", self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.triggered.connect(self._on_file_open)
+        file_menu.addAction(open_action)
+        file_menu.addSeparator()
+        # File | Quit
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut(QKeySequence.Quit)
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+        # Window menu
+        window_menu = menuBar.addMenu("&Window")
+        # Window | Add Window
+        add_window_action = QAction("Add Window", self)
+        add_window_action.triggered.connect(lambda: self._on_menu_add_window(len(self._charts)-1))
+        window_menu.addAction(add_window_action)
+
+        # Help menu
+        help_menu = menuBar.addMenu("&Help")
+        # Help | About
+        about_action = QAction("About", self)
+        about_action.triggered.connect(lambda: None)
+        help_menu.addAction(about_action)
+
+    def _on_file_open(self):
+        # native file dialog to pick a QRAW file
+        filename, _ = QFileDialog.getOpenFileName(self, "Open QRAW File", "", "QRAW Files (*.qraw);;All Files (*)")
+        if not filename:
+            return
+        # parse qraw file
+        new_file = QRawFile.load(filename)
+        if new_file is None:
+            # log information
+            logger.error("Failed to load selected QRAW file: %s", filename)
+            # exit
+            return
+        
     def _populate_charts(self):
         # this is a calculated field, do it once per file and cache it
         plot_suggestions = self.qraw_file.plot_suggestions
@@ -217,8 +263,8 @@ class MainWindow(QMainWindow):
             return
         # plot selected variables on the chart
         chart.plot_series(dialog.selected_variables)
-        # auto range axes to include the newly added series
-        chart.auto_range()
+        # auto range axes to include the newly added series (wait for QT event loop)
+        QTimer.singleShot(100, lambda: (chart.auto_range()))
 
     @Slot(int)
     def _on_menu_delete_all_plots(self, chart_index: int):

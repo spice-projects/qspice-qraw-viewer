@@ -69,14 +69,6 @@ class Chart:
                 # enqueue series for removal
                 for ordinate_variant, _, series_list, _, _ in ordinate_series:
                     series_to_remove.append([ordinate_variant.name, series_list])
-                # free Y axis if no other series is using it
-                for _, y_axis, _, _, _ in ordinate_series:
-                    # check there are no other series using this axis (i.e. no other series with a variable of the same type as this one)
-                    if y_axis not in [a for _, ordinate_series in self._series.values() for _, a, _, _, _ in ordinate_series if a != y_axis]:
-                        # log information
-                        logger.debug("Freeing Y axis [%d] reserved for variable type: %s", len(self._y_axes) - 1, variable.type.name)
-                        # delete axis from chart
-                        del self._y_axes[variable.type]
                 # remove from tracked series so we don't try to update it later
                 labels_to_remove.append(label)
         # update dictionary outside loop
@@ -129,7 +121,7 @@ class Chart:
         # add/remove series from chart
         self._component.plotSeries(series_to_render, series_to_remove)
         # release stash after Qt finishes its async processing
-        QTimer.singleShot(1000, lambda: (series_to_remove.clear()))
+        QTimer.singleShot(2000, lambda: (series_to_remove.clear()))
 
     def auto_range(self):
         # skip if no series are currently plotted
