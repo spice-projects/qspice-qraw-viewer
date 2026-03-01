@@ -207,7 +207,7 @@ class QRawFile:
     @property
     def plot_suggestion(self) -> str:
         return self._plot_suggestion
-    
+
     @property
     def num_points(self) -> int:
         return self._num_points
@@ -219,7 +219,7 @@ class QRawFile:
     @property
     def abscissa_points(self) -> int:
         return self._abscissa_points
-        
+
     @property
     def plot_suggestions(self) -> list[PlotSuggestion]:
         # empty or whitespace-only suggestions string means no suggestions

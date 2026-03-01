@@ -30,7 +30,7 @@ class VariableType(Enum):
 
 class Variable:
 
-    def __init__(self, index: int, name: str, type: VariableType, values: np.ndarray, steps: int = 1, magnitude = None, phase = None):
+    def __init__(self, index: int, name: str, type: VariableType, values: np.ndarray, steps: int = 1, magnitude=None, phase=None):
         # fields
         self._index = index
         self._name = name

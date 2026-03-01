@@ -74,10 +74,10 @@ class MainWindow(QMainWindow):
 
     def _create_main_menu(self):
         # menu bar
-        menuBar = self.menuBar()
+        menu_bar = self.menuBar()
 
         # File menu
-        file_menu = menuBar.addMenu("&File")
+        file_menu = menu_bar.addMenu("&File")
         # File | Open
         open_action = QAction("&Open...", self)
         open_action.setShortcut(QKeySequence.Open)
@@ -91,14 +91,14 @@ class MainWindow(QMainWindow):
         file_menu.addAction(quit_action)
 
         # Window menu
-        window_menu = menuBar.addMenu("&Window")
+        window_menu = menu_bar.addMenu("&Window")
         # Window | Add Window
         add_window_action = QAction("Add Window", self)
-        add_window_action.triggered.connect(lambda: self._on_menu_add_window(len(self._charts)-1))
+        add_window_action.triggered.connect(lambda: self._on_menu_add_window(len(self._charts) - 1))
         window_menu.addAction(add_window_action)
 
         # Help menu
-        help_menu = menuBar.addMenu("&Help")
+        help_menu = menu_bar.addMenu("&Help")
         # Help | About
         about_action = QAction("About", self)
         about_action.triggered.connect(lambda: None)
@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
             logger.error("Failed to load selected QRAW file: %s", filename)
             # exit
             return
-        
+
     def _populate_charts(self):
         # this is a calculated field, do it once per file and cache it
         plot_suggestions = self.qraw_file.plot_suggestions
