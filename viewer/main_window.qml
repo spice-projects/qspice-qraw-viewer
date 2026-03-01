@@ -9,6 +9,7 @@ Item {
 
     property int _activeChartIndex: -1
     property int _activeChartSeriesCount: 0
+    property bool _activeChartIsTimeDomain: false
 
     readonly property var seriesColorPalette: [
         "#f77f00",  // orange
@@ -30,6 +31,7 @@ Item {
     signal menuDeleteAllPlots(int chartIndex)
     signal menuAddWindow(int chartIndex)
     signal menuDeleteWindow(int chartIndex)
+    signal menuFft(int chartIndex)
 
     component ChartPanel: Item {
         id: panel
@@ -52,7 +54,7 @@ Item {
         signal menuDeleteAllPlots()
         signal menuDeleteWindow()
         // carries panel-local mouse coords so the root can position the shared menu
-        signal menuOpenRequested(real localX, real localY, int seriesCount)
+        signal menuOpenRequested(real localX, real localY, int seriesCount, bool isTimeDomain)
 
         // thin divider drawn above every panel except the first
         Rectangle {
@@ -364,7 +366,7 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.RightButton
-                onClicked: (mouse) => panel.menuOpenRequested(mouse.x, mouse.y, panel.seriesCount)
+                onClicked: (mouse) => panel.menuOpenRequested(mouse.x, mouse.y, panel.seriesCount, graphsView.xUnit === "s")
             }
 
             // mouse-wheel — X zoom toward cursor (plain), Y zoom toward cursor (Alt held)
@@ -596,11 +598,12 @@ Item {
                 onMenuDeleteAllPlots:     root.menuDeleteAllPlots(index)
                 onMenuDeleteWindow:       root.menuDeleteWindow(index)
                 // position and reveal the single shared context menu on right-click
-                onMenuOpenRequested: (localX, localY, sc) => {
+                onMenuOpenRequested: (localX, localY, sc, itd) => {
                     // map from panel-local coordinates to root-local coordinates
                     var pt = mapToItem(root, localX, localY)
                     root._activeChartIndex = index
                     root._activeChartSeriesCount = sc
+                    root._activeChartIsTimeDomain = itd
                     // clamp so the menu never overflows the root boundary
                     contextMenu.x = Math.min(pt.x, root.width  - contextMenu.width  - 2)
                     contextMenu.y = Math.min(pt.y, root.height - contextMenu.height - 2)
@@ -678,6 +681,8 @@ Item {
             ContextMenuSeparator {}
             ContextMenuItem { itemText: "Add/Remove Plots";     onTriggered: root.menuAddRemovePlots(root._activeChartIndex) }
             ContextMenuItem { itemText: "Delete All Plots";     enabled: root._activeChartSeriesCount > 0; onTriggered: root.menuDeleteAllPlots(root._activeChartIndex) }
+            ContextMenuSeparator {}
+            ContextMenuItem { itemText: "FFT...";               enabled: root._activeChartIsTimeDomain && root._activeChartSeriesCount > 0; onTriggered: root.menuFft(root._activeChartIndex) }
             ContextMenuSeparator {}
             ContextMenuItem { itemText: "Add Window";           onTriggered: root.menuAddWindow(root._activeChartIndex) }
             ContextMenuItem { itemText: "Delete Window";        enabled: chartsModel.count > 1; onTriggered: root.menuDeleteWindow(root._activeChartIndex) }

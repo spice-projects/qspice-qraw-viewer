@@ -8,8 +8,11 @@ from PySide6.QtWidgets import QMainWindow, QWidget, QFileDialog
 
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
+from .fft import FftOutput, WindowFunction, ZeroPadding, compute_fft, is_uniform
+from .fft_dialog import FftDialog
+from .fft_result_dialog import FftResultDialog
 from .qraw_file import QRawFile
-from .variable import Variable
+from .variable import Variable, VariableType
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +72,7 @@ class MainWindow(QMainWindow):
         self._root.menuDeleteAllPlots.connect(self._on_menu_delete_all_plots)
         self._root.menuAddWindow.connect(self._on_menu_add_window)
         self._root.menuDeleteWindow.connect(self._on_menu_delete_window)
+        self._root.menuFft.connect(self._on_menu_fft)
         # populate charts after the event loop starts so the window is visible first
         QTimer.singleShot(0, self._populate_charts)
 
@@ -285,3 +289,44 @@ class MainWindow(QMainWindow):
         # delete chart at index (do ot swap these two statements, C++ objects get deleted immediately when their Python reference is deleted, so we need to remove the chart from the UI before deleting the Python object)
         self._root.removeChart(chart_index)
         del self._charts[chart_index]
+
+    @Slot(int)
+    def _on_menu_fft(self, chart_index: int):
+        # log information
+        logger.debug("User requested FFT on chart at index: %d", chart_index)
+        # find chart
+        chart = self._charts[chart_index]
+        # abscissa variable (index 0 is always the abscissa)
+        abscissa = self.qraw_file.variables[0]
+        # collect real-valued ordinate variables currently plotted on this chart
+        variables = [v for v in chart.variables if not v.complex and v.type != VariableType.TIME]
+        if not variables:
+            logger.warning("No suitable time-domain variables to FFT on chart %d", chart_index)
+            return
+        # check for non-uniform sampling and log a warning; the dialog will proceed — fft.py will resample automatically
+        if not is_uniform(abscissa.values):
+            logger.warning("Chart %d abscissa is non-uniformly sampled; FFT will resample to uniform grid", chart_index)
+        # open FFT settings dialog
+        dialog = FftDialog(variables, abscissa, self._abscissa_from_index, self._abscissa_to_index, self)
+        if dialog.exec() != FftDialog.DialogCode.Accepted:
+            return
+        # retrieve user selections
+        variable = dialog.result_variable
+        from_index = dialog.result_from_index
+        to_index = dialog.result_to_index
+        window = dialog.result_window
+        zero_pad = dialog.result_zero_pad
+        normalize = dialog.result_normalize
+        output = dialog.result_output
+        # extract data slice for step 0 (first / only simulation step)
+        x = abscissa.values[from_index:to_index]
+        y = variable.step_values(0)[from_index:to_index]
+        # compute FFT using numpy
+        try:
+            frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output)
+        except ValueError:
+            logger.exception("FFT computation failed for variable '%s'", variable.name)
+            return
+        # display results
+        result_dialog = FftResultDialog(variable.name, output, frequencies, fft_values, self)
+        result_dialog.show()
