@@ -21,7 +21,7 @@ Item {
         "#bbdefb",  // pale blue
     ]
 
-    signal horizontalZoom(int chartIndex, real xLeftRatio, real xRightRatio)
+    signal horizontalZoom(int chartIndex, real xLeftRatio, real xRightRatio, real zoomFactor)
     signal verticalZoom(int chartIndex, real yTopRatio, real yBottomRatio)
     signal menuZoomToFit(int chartIndex)
     signal menuAutorange(int chartIndex)
@@ -43,7 +43,7 @@ Item {
         property bool legendVisible: false
         readonly property real plotAreaWidth: graphsView.plotArea.width
 
-        signal horizontalZoom(real xLeftRatio, real xRightRatio)
+        signal horizontalZoom(real xLeftRatio, real xRightRatio, real zoomFactor)
         signal verticalZoom(real yTopRatio, real yBottomRatio)
         signal menuZoomToFit()
         signal menuAutorange()
@@ -315,6 +315,27 @@ Item {
                 return Math.max(0, Math.min(1, ratio))
             }
 
+            // perform a horizontal zoom around a normalized centre point
+            // `center` must be in [0,1] and represents the x-position of the
+            // mouse cursor (or any other pivot) expressed as a fraction of the
+            // current visible range.  `factor` is the scale factor applied to
+            // the window width (<1 zooms in, >1 zooms out).  This routine
+            // computes the new [left,right] ratios such that the value at
+            // `center` remains fixed on the screen, mimicking the behaviour of
+            // most professional plotting applications.
+            function applyXZoom(center, factor) {
+                // compute raw ratios
+                var xr1 = center - center * factor
+                var xr2 = center + (1.0 - center) * factor
+                // enforce non-negative left bound only; right may exceed 1 so Python
+                // can distinguish zoom-out from pan
+                if (xr1 < 0) {
+                    xr1 = 0
+                }
+
+                panel.horizontalZoom(xr1, xr2, factor)
+            }
+
             // left-button drag — pans the X axis left/right
             MouseArea {
                 anchors.fill: parent
@@ -332,9 +353,8 @@ Item {
                     var delta = (mouse.x - selectionOverlay.panLastX) / graphsView.plotArea.width
                     // update reference for the next incremental step
                     selectionOverlay.panLastX = mouse.x
-                    // dragging right means pulling the data right — shift the window left (negative delta)
-                    // ratios outside [0,1] are valid; Python clamps them to data bounds
-                    panel.horizontalZoom(0 - delta, 1 - delta)
+                    // dragging right means pulling the data right — shift the window left
+                    panel.horizontalZoom(0 - delta, 1 - delta, 1)
                 }
 
                 onDoubleClicked: panel.menuAutorange()
@@ -351,9 +371,12 @@ Item {
             WheelHandler {
                 // include TouchPad so macOS trackpads are handled as well
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                onWheel: (event) => {
+                onWheel: function(event) {
                     // zoom factor: <1 = zoom in, >1 = zoom out; 0.15 per standard detent
-                    var f = 1.0 - (event.angleDelta.y / 120) * 0.15
+                    // log raw wheel movement
+
+                    // compute factor: positive delta will now produce f>1 (zoom out)
+                    var f = 1.0 + (event.angleDelta.y / 120) * 0.15
                     // clamp to avoid inverting the range or zooming out infinitely
                     f = Math.max(0.05, Math.min(4.0, f))
                     if (event.modifiers & Qt.AltModifier) {
@@ -371,10 +394,8 @@ Item {
                     else {
                         // horizontal zoom centered on cursor X position
                         var cx = selectionOverlay.pixelToXRatio(event.x)
-                        var xr1 = cx - cx * f
-                        var xr2 = cx + (1.0 - cx) * f
-                        // pass -1 for Y ratios to leave Y zoom unchanged
-                        panel.horizontalZoom(xr1, xr2)
+                        // call helper on the overlay object so it’s in scope
+                        selectionOverlay.applyXZoom(cx, f)
                     }
                 }
             }
@@ -565,7 +586,7 @@ Item {
                 // distribute height equally, accounting for inter-panel spacing
                 height: (chartsColumn.height - chartsColumn.spacing * Math.max(0, chartsModel.count - 1)) / Math.max(1, chartsModel.count)
 
-                onHorizontalZoom: (xr1, xr2) => root.horizontalZoom(index, xr1, xr2)
+                onHorizontalZoom: (xr1, xr2, f) => root.horizontalZoom(index, xr1, xr2, f)
                 onVerticalZoom: (yr1, yr2) => root.verticalZoom(index, yr1, yr2)
                 // bubble menu action signals up to root, adding chartIndex
                 onMenuZoomToFit:          root.menuZoomToFit(index)

@@ -145,6 +145,8 @@ class Chart:
             y_axis.setRange(y_min + y_top_ratio * (y_max - y_min), y_min + y_bottom_ratio * (y_max - y_min))
 
     def update_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float, y_bottom_ratio: float):
+        # vertical changes flag
+        vertical_changed=False
         # check vertical zoom ratios were provided
         if y_top_ratio >= 0 and y_bottom_ratio >= 0:
             # current zoom window
@@ -154,6 +156,8 @@ class Chart:
             y_bottom_ratio=current_y_top_ratio + y_bottom_ratio * (current_y_bottom_ratio - current_y_top_ratio)
             # update zoom window
             self._zoom_window=(self._zoom_window[0], y_top_ratio, self._zoom_window[2], y_bottom_ratio)
+            # update flag
+            vertical_changed=True
         # check horizontal zoom indexes were provided
         if abscissa_from_index >= 0 and abscissa_to_index >= 0:
             # update zoom window
@@ -161,7 +165,7 @@ class Chart:
             # process all series to apply the new zoom window, full redraw if horizontal zoom changed
             self._redraw_all_series()
             # auto range axes based on the new zoom window
-            return self.auto_range()
+            return self.auto_range() if vertical_changed else None
         # partial redraw sufficient when only vertical zoom changed
         _, y_top_ratio, _, y_bottom_ratio=self._zoom_window
         # update axis ranges based on collected min and max values for each variable type

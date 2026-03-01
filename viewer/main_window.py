@@ -147,18 +147,13 @@ class MainWindow(QMainWindow):
         # render chart
         chart.render("", self.qraw_file.abscissa_scale.value, set(variables))
 
-    @Slot(int, float, float)
-    def _on_horizontal_zoom(self, chart_index: int, x_left_ratio: float, x_right_ratio: float):
-        # log information
-        logger.debug("User requested X zoom on chart at index: %d, x=[%.3f, %.3f]", chart_index, x_left_ratio, x_right_ratio)
-        # calculate horizontal axis indices
-        from_index = int(self._abscissa_from_index + x_left_ratio * (self._abscissa_to_index - self._abscissa_from_index))
-        to_index = int(self._abscissa_from_index + x_right_ratio * (self._abscissa_to_index - self._abscissa_from_index))
-        # maximum number of values in the abscissa
+    @Slot(int, float, float, float)
+    def _on_horizontal_zoom(self, chart_index: int, x_left_ratio: float, x_right_ratio: float, zoom_factor: float):
+        # calculate horizontal axis indices from the supplied ratios
+        # convert ratios to indices and clamp to valid bounds before using
         total = len(self.qraw_file.variables[0].values)
-        # clamp to valid data bounds (important for wheel zoom-out where ratios can exceed [0, 1])
-        from_index = max(0, min(from_index, total - 1))
-        to_index = max(0, min(to_index, total))
+        from_index = max(0, min(int(self._abscissa_from_index + x_left_ratio * (self._abscissa_to_index - self._abscissa_from_index)), total - 1))
+        to_index = max(0, min(int(self._abscissa_from_index + x_right_ratio * (self._abscissa_to_index - self._abscissa_from_index)), total))
         # allow zoom-in beyond pixel width, only enforce a minimum window of 2 points
         min_window = 2
         # detect pure pan (translation) gestures: when the ratio span equals 1.0
@@ -168,7 +163,7 @@ class MainWindow(QMainWindow):
         current_to = self._abscissa_to_index
         current_window = current_to - current_from
         # small epsilon for floating comparisons
-        if abs(ratio_span - 1.0) < 1e-9:
+        if abs(ratio_span - 1.0) < 1e-9 or zoom_factor == 1.0:
             # this is a pan: compute integer shift in samples and apply
             shift = int(round(x_left_ratio * current_window))
             new_from = max(0, min(total - current_window, current_from + shift))
@@ -176,13 +171,14 @@ class MainWindow(QMainWindow):
             from_index = new_from
             to_index = new_to
         else:
+            # choose direction based on factor (<1 zoom-in, >1 zoom-out)
             window = to_index - from_index
             mid = (from_index + to_index) // 2
             step = max(1, window // 8)
             if window < min_window:
                 from_index = max(0, mid - min_window // 2)
                 to_index = min(total, from_index + min_window)
-            elif window > current_window:
+            elif zoom_factor > 1.0:
                 # zoom-out: expand window by a small step, up to full range
                 new_window = min(total, window + step)
                 from_index = max(0, mid - new_window // 2)
