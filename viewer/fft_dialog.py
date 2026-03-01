@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QUrl, Qt, Slot
+from PySide6.QtCore import Qt, QUrl, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
@@ -72,6 +72,7 @@ class FftDialog(QDialog):
         self._qml_view.statusChanged.connect(self._on_qml_ready)
         self._qml_view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
         self._qml_view.setColor(QColor(_BG))
+        # set context properties so QML can bind to them immediately on load
         ctx = self._qml_view.rootContext()
         for key, value in ctx_properties.items():
             ctx.setContextProperty(key, value)
@@ -84,58 +85,65 @@ class FftDialog(QDialog):
 
     @Slot(QQuickView.Status)
     def _on_qml_ready(self, status: QQuickView.Status):
+        # only proceed once QML has finished loading successfully
         if status != QQuickView.Status.Ready:
             return
+        # connect QML dialog signals to Python accept / reject
         root = self._qml_view.rootObject()
         root.dialogAccepted.connect(self._on_dialog_accepted)
         root.dialogRejected.connect(self.reject)
 
     @Slot(str, str, str, str, bool, str, float, float)
     def _on_dialog_accepted(self, variable_name: str, window_fn: str, zero_pad: str, output: str, normalize: bool, range_mode: str, custom_from: float, custom_to: float):
-        # resolve variable
+        # resolve variable by name against the stored list
         variable = next((v for v in self._variables if v.name == variable_name), None)
         if variable is None:
+            # log warning and reject dialog when variable cannot be found
             logger.warning("FFT dialog accepted with unknown variable: %s", variable_name)
             self.reject()
             return
+        # store the resolved variable
         self._result_variable = variable
         # window function
         try:
             self._result_window = WindowFunction(window_fn)
         except ValueError:
+            # fall back to rectangular when the value is unrecognised
             self._result_window = WindowFunction.RECTANGULAR
         # zero-padding
         try:
             self._result_zero_pad = ZeroPadding(zero_pad)
         except ValueError:
+            # fall back to no padding when the value is unrecognised
             self._result_zero_pad = ZeroPadding.NONE
         # output type
         try:
             self._result_output = FftOutput(output)
         except ValueError:
+            # fall back to magnitude when the value is unrecognised
             self._result_output = FftOutput.MAGNITUDE
         # normalize flag
         self._result_normalize = normalize
         # data range
         abscissa_values = self._abscissa.values
+        # total number of abscissa samples
         total = len(abscissa_values)
         if range_mode == "zoom":
+            # use the current visible zoom window
             self._result_from_index = self._zoom_from_index
             self._result_to_index = self._zoom_to_index
         elif range_mode == "custom":
+            # map user-supplied time values to nearest sample indices
             from_idx = int(np.searchsorted(abscissa_values, custom_from))
             to_idx = int(np.searchsorted(abscissa_values, custom_to, side="right"))
+            # clamp to valid range ensuring at least 2 samples
             self._result_from_index = max(0, min(from_idx, total - 2))
             self._result_to_index = max(self._result_from_index + 2, min(to_idx, total))
         else:
-            # "all" — full range
+            # use the full abscissa range
             self._result_from_index = 0
             self._result_to_index = total
         self.accept()
-
-    # ------------------------------------------------------------------
-    # Result properties (valid after exec() returns Accepted)
-    # ------------------------------------------------------------------
 
     @property
     def result_variable(self) -> Variable | None:

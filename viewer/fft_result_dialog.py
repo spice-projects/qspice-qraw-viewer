@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QUrl, Qt, Slot
+from PySide6.QtCore import Qt, QUrl, Slot
 from PySide6.QtGraphs import QLineSeries
 from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
@@ -31,6 +31,7 @@ class FftResultDialog(QDialog):
 
     def __init__(self, series_name: str, output: FftOutput, frequencies: np.ndarray, values: np.ndarray, parent=None):
         super().__init__(parent)
+        # store fields
         self._series_name = series_name
         self._output = output
         self._frequencies = frequencies
@@ -48,6 +49,7 @@ class FftResultDialog(QDialog):
         self._qml_view.statusChanged.connect(self._on_qml_ready)
         self._qml_view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
         self._qml_view.setColor(QColor(_BG))
+        # set individual context properties
         ctx = self._qml_view.rootContext()
         ctx.setContextProperty("seriesLabel", series_name)
         ctx.setContextProperty("yAxisLabel", y_label)
@@ -64,45 +66,53 @@ class FftResultDialog(QDialog):
 
     @staticmethod
     def _y_axis_label(output: FftOutput) -> str:
+        # dB magnitude uses the decibel unit
         if output == FftOutput.MAGNITUDE_DB:
             return "dB"
+        # phase is expressed in degrees
         if output == FftOutput.PHASE:
             return "°"
         return ""
 
     @Slot(QQuickView.Status)
     def _on_qml_ready(self, status: QQuickView.Status):
+        # only proceed once QML has finished loading successfully
         if status != QQuickView.Status.Ready:
             return
+        # connect QML signals to Python handlers
         root = self._qml_view.rootObject()
         root.exportCsvRequested.connect(self._on_export_csv)
         root.closeRequested.connect(self.close)
         # create QLineSeries, fill it and hand it to the QML chart
         self._series = QLineSeries()
+        # set line width
         self._series.setWidth(1)
+        # set line color
         self._series.setColor(QColor("#f77f00"))
-        self._series.replaceNp(
-            np.ascontiguousarray(self._frequencies, dtype=np.float64),
-            np.ascontiguousarray(self._values, dtype=np.float64),
-        )
+        # populate series with FFT data — ascontiguousarray ensures Qt-compatible memory layout
+        self._series.replaceNp(np.ascontiguousarray(self._frequencies, dtype=np.float64), np.ascontiguousarray(self._values, dtype=np.float64))
+        # add series to the QML chart
         root.addSeries(self._series)
 
     @Slot()
     def _on_export_csv(self):
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export FFT to CSV",
-            f"fft_{self._series_name}.csv",
-            "CSV Files (*.csv);;All Files (*)",
-        )
+        # open a native save dialog to let the user pick a destination file
+        filename, _ = QFileDialog.getSaveFileName(self, "Export FFT to CSV", f"fft_{self._series_name}.csv", "CSV Files (*.csv);;All Files (*)")
+        # exit early if the user cancelled without selecting a file
         if not filename:
             return
         try:
+            # write frequency and spectrum value pairs as CSV rows
             with open(filename, "w", newline="") as f:
+                # create writer
                 writer = csv.writer(f)
+                # header row with column labels
                 writer.writerow(["Frequency (Hz)", self._output.value])
+                # data rows — one row per frequency bin
                 for freq, val in zip(self._frequencies, self._values):
                     writer.writerow([freq, val])
+            # log success
             logger.info("FFT results exported to %s", filename)
         except OSError:
+            # log error
             logger.exception("Failed to export FFT results to %s", filename)

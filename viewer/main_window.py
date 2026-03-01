@@ -2,9 +2,9 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
-from PySide6.QtGui import QColor, QGuiApplication, QAction, QKeySequence
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QKeySequence
 from PySide6.QtQuick import QQuickView
-from PySide6.QtWidgets import QMainWindow, QWidget, QFileDialog
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
 
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
@@ -301,10 +301,12 @@ class MainWindow(QMainWindow):
         # collect real-valued ordinate variables currently plotted on this chart
         variables = [v for v in chart.variables if not v.complex and v.type != VariableType.TIME]
         if not variables:
+            # log warning — no suitable variables to transform
             logger.warning("No suitable time-domain variables to FFT on chart %d", chart_index)
             return
         # check for non-uniform sampling and log a warning; the dialog will proceed — fft.py will resample automatically
         if not is_uniform(abscissa.values):
+            # log warning — FFT will resample to a uniform grid before computing
             logger.warning("Chart %d abscissa is non-uniformly sampled; FFT will resample to uniform grid", chart_index)
         # open FFT settings dialog
         dialog = FftDialog(variables, abscissa, self._abscissa_from_index, self._abscissa_to_index, self)
@@ -325,6 +327,7 @@ class MainWindow(QMainWindow):
         try:
             frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output)
         except ValueError:
+            # log exception and abort when computation fails
             logger.exception("FFT computation failed for variable '%s'", variable.name)
             return
         # display results
