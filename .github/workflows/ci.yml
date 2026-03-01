@@ -26,7 +26,8 @@ jobs:
 
       - name: Install project
         run: |
-          pip install .
+          pip install --no-deps .
+          pip install numpy
 
       - name: Run tests with coverage
         run: |
