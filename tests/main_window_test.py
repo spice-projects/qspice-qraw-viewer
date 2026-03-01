@@ -15,7 +15,7 @@ sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
 # QMainWindow must be a concrete class so that MainWindow can genuinely inherit from it
 sys.modules["PySide6.QtWidgets"].QMainWindow = type("QMainWindow", (), {})
 
-from viewer.main_window import MainWindow
+from viewer.main_window import MainWindow  # noqa: E402
 
 
 class TestMainWindow(TestCase):
@@ -146,4 +146,3 @@ class TestMainWindow(TestCase):
         # assert
         self.assertEqual(win._abscissa_from_index, 10)
         self.assertEqual(win._abscissa_to_index, 20)
-

@@ -10,8 +10,8 @@ sys.modules.setdefault("PySide6.QtCore", MagicMock())
 sys.modules.setdefault("PySide6.QtGraphs", MagicMock())
 sys.modules.setdefault("PySide6.QtQuick", MagicMock())
 
-from viewer.chart import Chart
-from viewer.variable import Variable, VariableType
+from viewer.chart import Chart  # noqa: E402
+from viewer.variable import Variable, VariableType  # noqa: E402
 
 
 class TestChart(TestCase):
