@@ -82,7 +82,7 @@ class TestDecimationAlgorithm(TestCase):
         # act
         result = decimate(values, target, algorithm)
         # assert
-        self.assertLessEqual(len(result), target + 1)
+        self.assertLessEqual(len(result), target)
 
     def test_nth_point_length(self):
         # arrange
@@ -90,7 +90,7 @@ class TestDecimationAlgorithm(TestCase):
         # act
         result = decimate(values, 50, DecimationAlgorithm.NTH_POINT)
         # assert
-        self.assertLessEqual(len(result), 51)
+        self.assertLessEqual(len(result), 50)
 
     def test_min_max_length(self):
         self._assert_length_le_target(DecimationAlgorithm.MIN_MAX)
@@ -139,11 +139,9 @@ class TestDecimationAlgorithm(TestCase):
         values = np.arange(1000, dtype=np.float64)
         # act
         result = decimate(values, 100, DecimationAlgorithm.NTH_POINT)
-        # assert
-        expected_stride = 1000 // 100
-        expected_indices = list(range(0, 1000, expected_stride))
-        if expected_indices[-1] != 999:
-            expected_indices.append(999)
+        # assert: indices should match the linspace-based implementation used
+        # internally and must include the first & last points.
+        expected_indices = np.unique(np.linspace(0, 999, num=100, dtype=np.int64))
         np.testing.assert_array_equal(result, values[expected_indices])
 
     def test_min_max_output_contains_bucket_extremes(self):
@@ -247,6 +245,15 @@ class TestDecimationAlgorithm(TestCase):
         # assert
         self.assertTrue(_is_subset_of(result, values))
 
+    def test_lttb_target_one_returns_first(self):
+        # arrange
+        values = _sine(500)
+        # act
+        result = decimate(values, 1, DecimationAlgorithm.LTTB)
+        # assert we get exactly the first sample
+        self.assertEqual(len(result), 1)
+        self.assertAlmostEqual(float(result[0]), float(values[0]))
+
     def test_lttb_target_2_edge_case(self):
         # arrange
         values = _sine(500)
@@ -315,6 +322,7 @@ class TestDecimationAlgorithm(TestCase):
         x_out, y_out = decimate_xy(x, y, 200, algorithm)
         # assert
         self.assertEqual(len(x_out), len(y_out))
+        # when algorithm is not AVERAGE the x/y pairs must exactly match
         if algorithm != DecimationAlgorithm.AVERAGE:
             self.assertTrue(_xy_pairs_coherent(x_out, y_out, x, y))
 
@@ -332,3 +340,62 @@ class TestDecimationAlgorithm(TestCase):
 
     def test_xy_average_coherent(self):
         self._assert_xy_coherent(DecimationAlgorithm.AVERAGE)
+
+    # ------------------------------------------------------------------
+    # invalid parameter tests
+    # ------------------------------------------------------------------
+
+    def test_target_zero_raises(self):
+        # arrange
+        values = _sine(100)
+        # act/assert
+        with self.assertRaises(ValueError):
+            decimate(values, 0, DecimationAlgorithm.NTH_POINT)
+        with self.assertRaises(ValueError):
+            decimate(values, -1, DecimationAlgorithm.MIN_MAX)
+
+    def test_xy_invalid_target_raises(self):
+        # arrange
+        x = _linspace(10)
+        y = _sine(10)
+        # act/assert
+        with self.assertRaises(ValueError):
+            decimate_xy(x, y, 0, DecimationAlgorithm.NTH_POINT)
+
+    def test_xy_length_mismatch_raises(self):
+        # arrange
+        x = _linspace(10)
+        y = _sine(9)
+        # any algorithm should reject mismatched input lengths
+        # act/assert: iterate algorithms expecting a ValueError each time
+        for alg in DecimationAlgorithm:
+            with self.subTest(algorithm=alg):
+                with self.assertRaises(ValueError):
+                    decimate_xy(x, y, 5, alg)
+
+    def test_invalid_algorithm_raises(self):
+        # arrange
+        values = _sine(100)
+        # act/assert
+        with self.assertRaises(ValueError):
+            # cast a string to bypass type checker
+            decimate(values, 10, "not_an_algorithm")
+
+    def test_value_dependent_small_targets(self):
+        # arrange - signal for testing
+        values = _sine(500)
+        # act/assert - exercise MIN_MAX and M4 with tiny targets
+        for alg in (DecimationAlgorithm.MIN_MAX, DecimationAlgorithm.M4):
+            # for each algorithm try several small target counts
+            for t in (1, 2, 3, 4):
+                result = decimate(values, t, alg)
+                # assert not more points than requested
+                self.assertLessEqual(len(result), t)
+                # when only one point requested, this must be the first sample
+                if t == 1:
+                    self.assertEqual(len(result), 1)
+                # M4 also promises to keep endpoints for t>=2
+                if alg == DecimationAlgorithm.M4 and t >= 2:
+                    # the m4 algorithm guarantees the first/last samples are kept
+                    self.assertAlmostEqual(float(result[0]), float(values[0]))
+                    self.assertAlmostEqual(float(result[-1]), float(values[-1]))

@@ -98,16 +98,24 @@ _MODE_TO_CHART: dict[str, ChartTypeSpec] = {
 
 
 def _chart_type_for_mode(mode: str) -> ChartTypeSpec | None:
-    """Map a mode keyword from a plot suggestion (e.g. 'AC', 'tran') to a ChartTypeSpec.
+    """Convert a leading mode token from a plot-suggestion group to a chart type.
 
-    Returns None when the keyword is not recognised, so the caller can fall back
-    to :func:`chart_type_for_file`.
+    The suggestion syntax allows an optional mode keyword such as ``ac`` or
+    ``tran`` that overrides the default for the file.  If the keyword is not
+    recognised this helper returns ``None`` and the caller can fall back to
+    :func:`chart_type_for_file`.
     """
     return _MODE_TO_CHART.get(mode.lower())
 
 
-def chart_type_for_file(qraw_file) -> ChartTypeSpec:
-    """Return the correct chart type for a loaded file based on the X axis variable type."""
+def chart_type_for_file(qraw_file: "QRawFile") -> ChartTypeSpec:
+    """Return the appropriate *ChartTypeSpec* for a given file instance.
+
+    The function examines the type of the abscissa variable (index~0) and
+    chooses a layout accordingly.  When the file contains no variables we
+    default to ``TRANSIENT`` because there is no reliable way to infer the
+    intent.
+    """
     # variables list must not be empty
     if not qraw_file.variables:
         return TRANSIENT
@@ -145,6 +153,8 @@ class QRawFile:
         self._title = title
         self._date = date
         self._plotname = plotname
+        # field name uses the builtin but that's intentional; callers expect
+        # a `complex` property and shadowing the builtin here is harmless.
         self._complex = complex
         self._stepped = stepped
         self._abscissa = abscissa
@@ -232,7 +242,9 @@ class QRawFile:
         # plot suggestions
         plot_suggestions: list[PlotSuggestion] = []
         # extract each «...» group in order
-        for group_text in re.findall("\xab(.*?)\xbb", self.plot_suggestion):
+        # ``\xab``/``\xbb`` are the «» characters; using a raw string avoids
+        # accidental escaping.
+        for group_text in re.findall(r"\xab(.*?)\xbb", self.plot_suggestion):
             # split group text into tokens; the first token may be a mode keyword
             tokens: list[str] = group_text.split()
             # chart type, defaults to chart type for file
@@ -342,7 +354,7 @@ class QRawFile:
                 # exit
                 return None
             # parse header values needed to interpret the binary data
-            complex = "complex" in header.get("Flags", "").lower()
+            is_complex = "complex" in header.get("Flags", "").lower()
             stepped = "stepped" in header.get("Flags", "").lower()
             num_variables = int(header.get("No. Variables", 0))
             num_points = int(header.get("No. Points", "0").strip())
@@ -352,7 +364,7 @@ class QRawFile:
             abscissa_max = float(abscissa_parts[1]) if len(abscissa_parts) >= 2 else 0.0
             abscissa_scale = AbscissaScale(abscissa_parts[2]) if len(abscissa_parts) >= 3 else AbscissaScale.LINEAR
             # check file contains vectors with complex numbers
-            if complex:
+            if is_complex:
                 # complex files store the abscissa (index 0) as float64 and the remaining variables as complex128 in a structured array
                 row_dtype = np.dtype([("abscissa", "<f8"), ("data", "<c16", num_variables - 1)])
                 # parse binary data into a structured array with separate fields for abscissa and data variables; the abscissa is stored in a separate field to allow it to be read as float64 while the data variables are stored as complex128
@@ -362,14 +374,14 @@ class QRawFile:
                 # abscissa variable
                 abscissa_variable = Variable(index=abscissa_definition[0], name=abscissa_definition[1], type=abscissa_definition[2], values=matrix["abscissa"])
                 # all variables
-                variables = [abscissa_variable] + [Variable(index=idx, name=name, type=type, values=matrix["data"][:, idx - 1]) for idx, name, type in variable_definitions[1:]]
+                variables = [abscissa_variable] + [Variable(index=idx, name=name, type=var_type, values=matrix["data"][:, idx - 1]) for idx, name, var_type in variable_definitions[1:]]
             else:
                 # real files store all variables as float64 in a uniform layout; parse binary data into a 2D array with shape (num_points, num_variables)
                 flat = np.frombuffer(data, dtype="<f8", offset=binary_offset)
                 # reshape flat array into a 2D array with shape (num_points, num_variables); the data is stored in row-major order, so each row corresponds to a point and each column corresponds to a variable
                 matrix = flat.reshape(num_points, num_variables)
                 # extract variables
-                variables = [Variable(index=idx, name=name, type=type, values=matrix[:, idx]) for idx, name, type in variable_definitions]
+                variables = [Variable(index=idx, name=name, type=var_type, values=matrix[:, idx]) for idx, name, var_type in variable_definitions]
             # check this is a stepped file
             if stepped:
                 # abscissa variable data
@@ -390,7 +402,7 @@ class QRawFile:
                 # apply log2 only once per file
                 variables[0] = Variable(index=0, name=variables[0].name, type=variables[0].type, values=np.log2(variables[0].values), steps=variables[0].steps)
             # create QRawFile instance with parsed header, variables, and binary data; pass the mmap so it stays alive for the lifetime of the QRawFile — Variable arrays are views into it
-            return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, stepped=stepped, abscissa=header.get("Abscissa", ""), abscissa_min=abscissa_min, abscissa_max=abscissa_max, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), num_points=num_points, variables=variables, _mmap=data)
+            return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=is_complex, stepped=stepped, abscissa=header.get("Abscissa", ""), abscissa_min=abscissa_min, abscissa_max=abscissa_max, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), num_points=num_points, variables=variables, _mmap=data)
         finally:
             # log information
             logger.info("Finished loading QRAW file: %s, latency: %f seconds", path, time.perf_counter() - start_time)

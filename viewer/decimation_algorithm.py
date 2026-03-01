@@ -77,74 +77,126 @@ class DecimationAlgorithm(enum.Enum):
 # Each function returns a sorted int64 index array into the original vector.
 # Separating index computation from value selection allows the same indices
 # to be reused for the paired abscissa array in decimate_xy().
+# The helper ``_trim_indices`` is used to make sure the result never
+# contains more than *target* points, which might happen when the bucketed
+# algorithms produce two extremes per bucket and then deduplicate.
 # ---------------------------------------------------------------------------
 
+
+def _trim_indices(indices: np.ndarray, target: int) -> np.ndarray:
+    """Ensure ``indices`` contains at most *target* entries while keeping
+    both endpoints.
+
+    If the array is already short enough it is returned unchanged.  When
+    trimming is required we always keep the first and last index and choose
+    the remaining slots by sampling the sorted interior evenly.
+    """
+    if len(indices) <= target:
+        return indices
+    # keep first and last, sample the interior
+    if target <= 2:
+        return np.array([indices[0], indices[-1]])[:target]
+    # select evenly spaced positions in the interior (excluding endpoints)
+    interior = indices[1:-1]
+    count = target - 2
+    # np.linspace with dtype=int may produce duplicates, so use float and
+    # round below
+    pos = np.linspace(0, len(interior) - 1, count)
+    chosen = interior[np.round(pos).astype(np.int64)]
+    return np.concatenate(([indices[0]], chosen, [indices[-1]]))
+
+
 def _nth_point_indices(length: int, target: int) -> np.ndarray:
-    # ceiling division: stride = ceil(length / target) guarantees that
-    # np.arange(0, length, stride) produces at most *target* indices
-    stride = max(1, (length + target - 1) // target)
-    # select indices at uniform intervals — always include the last point
-    indices = np.arange(0, length, stride)
-    if indices[-1] != length - 1:
-        indices = np.append(indices, length - 1)
-    # exit
-    return indices
+    # generate at most *target* indices evenly spaced through the range
+    # [0, length-1].  ``numpy.linspace`` handles the edge cases neatly and
+    # always includes the first sample; ``np.unique`` is used afterwards to
+    # remove duplicates that can occur when the requested point count is
+    # comparable to the input length.
+    if length <= target:
+        # caller will handle the short-circuit case, but having a quick path
+        # here simplifies the logic in ``decimate``.
+        return np.arange(length, dtype=np.int64)
+    # linspace with integer dtype will floor the generated values; unique
+    # keeps the count <= target and preserves monotonic order.
+    indices = np.linspace(0, length - 1, num=target, dtype=np.int64)
+    return np.unique(indices)
 
 
 def _min_max_indices(values: np.ndarray, target: int) -> np.ndarray:
     length = len(values)
-    # ceiling division: ensures number_of_buckets <= target // 2, so output <= target
+    # extremely small targets are trivial
+    if target <= 1:
+        return np.array([0], dtype=np.int64)
+    if target == 2:
+        return np.array([0, length - 1], dtype=np.int64)
+    # determine how many points should be in each bucket so that two points
+    # per bucket (min & max) will not exceed *target* before deduplication
     half = max(1, target // 2)
     points_per_bucket = max(1, (length + half - 1) // half)
-    # number of buckets
     number_of_buckets = length // points_per_bucket
-    # trimmed vector reshaped into (buckets × points_per_bucket)
-    trimmed = values[:number_of_buckets * points_per_bucket].reshape(number_of_buckets, points_per_bucket)
-    # find relative indices of min and max inside each bucket
+    # reshape the portion of the array that fits evenly into buckets
+    trimmed = values[: number_of_buckets * points_per_bucket].reshape(number_of_buckets, points_per_bucket)
+    # find extrema within each bucket
     min_indices = np.argmin(trimmed, axis=1)
     max_indices = np.argmax(trimmed, axis=1)
-    # allocate index array
+    # build the absolute indices, interleaving min and max
     indexes = np.empty((number_of_buckets * 2,), dtype=np.int64)
-    # interleave min and max indices — even slots for min, odd slots for max
     indexes[0::2] = min_indices + np.arange(number_of_buckets) * points_per_bucket
     indexes[1::2] = max_indices + np.arange(number_of_buckets) * points_per_bucket
-    # sort to keep the line from zig-zagging backwards, remove duplicates
-    return np.unique(indexes)
+    # sort and deduplicate the result
+    indices = np.unique(indexes)
+    # final trimming ensures length <= target
+    # ensure the count still respects *target* after deduplication
+    return _trim_indices(indices, target)
 
 
 def _m4_indices(values: np.ndarray, target: int) -> np.ndarray:
     length = len(values)
-    # each bucket emits up to 4 points (first, last, min, max), so we need
-    # target/4 buckets to stay within target; ceiling division guarantees that
+    # trivial cases first
+    if target <= 1:
+        return np.array([0], dtype=np.int64)
+    if target == 2:
+        return np.array([0, length - 1], dtype=np.int64)
+    # choose bucket size so that four points per bucket stays within target
     quarter = max(1, target // 4)
     points_per_bucket = max(1, (length + quarter - 1) // quarter)
-    # number of buckets
     number_of_buckets = length // points_per_bucket
-    # bucket start offset for each bucket
     bucket_offsets = np.arange(number_of_buckets) * points_per_bucket
-    # trimmed vector reshaped into (buckets × points_per_bucket)
-    trimmed = values[:number_of_buckets * points_per_bucket].reshape(number_of_buckets, points_per_bucket)
-    # find relative indices of first, last, min and max inside each bucket
+    # reshape for bucket-wise calculations
+    trimmed = values[: number_of_buckets * points_per_bucket].reshape(number_of_buckets, points_per_bucket)
+    # collect first/last/min/max positions within each bucket
     first_indices = np.zeros(number_of_buckets, dtype=np.int64)
     last_indices = np.full(number_of_buckets, points_per_bucket - 1, dtype=np.int64)
     min_indices = np.argmin(trimmed, axis=1)
     max_indices = np.argmax(trimmed, axis=1)
-    # convert relative indices to absolute positions in the original vector
-    indexes = np.concatenate([first_indices + bucket_offsets, last_indices + bucket_offsets, min_indices + bucket_offsets, max_indices + bucket_offsets])
-    # sort and deduplicate to keep the line continuous and gap-free
-    return np.unique(indexes)
+    indexes = np.concatenate([
+        first_indices + bucket_offsets,
+        last_indices + bucket_offsets,
+        min_indices + bucket_offsets,
+        max_indices + bucket_offsets,
+    ])
+    indices = np.unique(indexes)
+    # ensure we didn't accidentally exceed the limit
+    return _trim_indices(indices, target)
 
 
 def _lttb_indices(x: np.ndarray, values: np.ndarray, target: int) -> np.ndarray:
     length = len(values)
-    # output indices — first and last points are always kept
+    # handle very small target values explicitly so we don't overwrite the
+    # only slot when target == 1 (previous implementation ended up returning
+    # the *last* point, which surprised callers).
+    if target <= 0:
+        return np.empty(0, dtype=np.int64)
+    if target == 1:
+        return np.array([0], dtype=np.int64)
+    # output buffer for indices; first and last slots are fixed below
     out_indices = np.empty(target, dtype=np.int64)
     out_indices[0] = 0
     out_indices[-1] = length - 1
-    # target <= 2 means only first and last are needed — skip bucket loop to
-    # avoid a ZeroDivisionError in the bucket_size formula below
-    if target <= 2:
-        return out_indices[:2]
+    # target == 2 is now satisfied, and we can return early without entering
+    # the bucket loop that would divide by zero.
+    if target == 2:
+        return out_indices
     # divide the interior into (target - 2) buckets; each iteration selects one point
     bucket_size = (length - 2) / (target - 2)
     # index of the previously selected point (starts at the first sample)
@@ -261,7 +313,8 @@ def decimate(values: np.ndarray, target: int, algorithm: DecimationAlgorithm = D
     Parameters
     ----------
     values    : 1-D numpy array of real (float64) samples.
-    target    : desired maximum number of output points.
+    target    : desired maximum number of output points.  Must be >= 1 unless
+                ``algorithm`` is ``DecimationAlgorithm.NONE``.
     algorithm : one of the DecimationAlgorithm enum members (default: M4).
 
     Returns
@@ -269,13 +322,23 @@ def decimate(values: np.ndarray, target: int, algorithm: DecimationAlgorithm = D
     A numpy array with at most *target* elements.  If ``len(values) <= target``
     the original array is returned unchanged regardless of the algorithm.
 
-    Note
-    ----
-    When both an abscissa (x) and an ordinate (y) are available, prefer
-    ``decimate_xy`` to ensure x/y pairs always correspond to the same original
-    sample and are never mismatched.
+    Raises
+    ------
+    ValueError
+        If ``target`` is less than 1 (and the algorithm is not ``NONE``) or
+        if ``algorithm`` is not a recognised enum member.
     """
-    return _ALGORITHM_FN[algorithm](values, target)
+    # validate target; ``NONE`` deliberately bypasses decimation, so allow
+    # any positive or zero value in that case.
+    if target < 1 and algorithm != DecimationAlgorithm.NONE:
+        raise ValueError("target must be >= 1")
+    # dispatch to algorithm implementation; give a nicer error message instead
+    # of letting a KeyError bubble up.
+    try:
+        fn = _ALGORITHM_FN[algorithm]
+    except KeyError:
+        raise ValueError(f"Unknown decimation algorithm: {algorithm}")
+    return fn(values, target)
 
 
 def decimate_xy(x: np.ndarray, y: np.ndarray, target: int, algorithm: DecimationAlgorithm = DecimationAlgorithm.M4) -> tuple[np.ndarray, np.ndarray]:
@@ -300,10 +363,21 @@ def decimate_xy(x: np.ndarray, y: np.ndarray, target: int, algorithm: Decimation
     target    : desired maximum number of output points.
     algorithm : one of the DecimationAlgorithm enum members (default: M4).
 
+    Raises
+    ------
+    ValueError
+        If ``target`` is less than 1 (and the algorithm is not ``NONE``) or if
+        ``len(x) != len(y)``.
+
     Returns
     -------
     Tuple (x_decimated, y_decimated), each a numpy array with at most *target* elements.  If ``len(y) <= target`` both arrays are returned unchanged.
     """
+    # validate input lengths early to avoid confusing index errors later
+    if len(x) != len(y):
+        raise ValueError("x and y must have the same length")
+    if target < 1 and algorithm != DecimationAlgorithm.NONE:
+        raise ValueError("target must be >= 1")
     # NONE — pass both arrays through unchanged
     if algorithm == DecimationAlgorithm.NONE:
         return x, y
