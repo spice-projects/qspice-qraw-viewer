@@ -2,14 +2,16 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
-from PySide6.QtGui import QColor, QGuiApplication, QAction, QKeySequence
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QKeySequence
 from PySide6.QtQuick import QQuickView
-from PySide6.QtWidgets import QMainWindow, QWidget, QFileDialog
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
 
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
-from .qraw_file import QRawFile
-from .variable import Variable
+from .fft import FftOutput, compute_fft, is_uniform
+from .fft_dialog import FftDialog
+from .qraw_file import AbscissaScale, QRawFile
+from .variable import Variable, VariableType
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(f"QMainWindow {{ background: {_BG}; }}")
         # initialize data structures
         self._charts: list[Chart] = []
+        # keep FFT result windows alive to prevent garbage collection
+        self._fft_windows: list[MainWindow] = []
         # default horizontal zoom
         self._abscissa_from_index = 0
         self._abscissa_to_index = self.qraw_file.abscissa_points
@@ -69,6 +73,7 @@ class MainWindow(QMainWindow):
         self._root.menuDeleteAllPlots.connect(self._on_menu_delete_all_plots)
         self._root.menuAddWindow.connect(self._on_menu_add_window)
         self._root.menuDeleteWindow.connect(self._on_menu_delete_window)
+        self._root.menuFft.connect(self._on_menu_fft)
         # populate charts after the event loop starts so the window is visible first
         QTimer.singleShot(0, self._populate_charts)
 
@@ -285,3 +290,65 @@ class MainWindow(QMainWindow):
         # delete chart at index (do ot swap these two statements, C++ objects get deleted immediately when their Python reference is deleted, so we need to remove the chart from the UI before deleting the Python object)
         self._root.removeChart(chart_index)
         del self._charts[chart_index]
+
+    @Slot(int)
+    def _on_menu_fft(self, chart_index: int):
+        # log information
+        logger.debug("User requested FFT on chart at index: %d", chart_index)
+        # find chart
+        chart = self._charts[chart_index]
+        # abscissa variable (index 0 is always the abscissa)
+        abscissa = self.qraw_file.variables[0]
+        # collect real-valued ordinate variables currently plotted on this chart
+        variables = [v for v in chart.variables if not v.complex and v.type != VariableType.TIME]
+        if not variables:
+            # log warning — no suitable variables to transform
+            logger.warning("No suitable time-domain variables to FFT on chart %d", chart_index)
+            return
+        # check for non-uniform sampling and log a warning; the dialog will proceed — fft.py will resample automatically
+        if not is_uniform(abscissa.values):
+            # log warning — FFT will resample to a uniform grid before computing
+            logger.warning("Chart %d abscissa is non-uniformly sampled; FFT will resample to uniform grid", chart_index)
+        # open FFT settings dialog
+        dialog = FftDialog(variables, abscissa, self._abscissa_from_index, self._abscissa_to_index, self)
+        if dialog.exec() != FftDialog.DialogCode.Accepted:
+            return
+        # retrieve user selections
+        variable = dialog.result_variable
+        from_index = dialog.result_from_index
+        to_index = dialog.result_to_index
+        window = dialog.result_window
+        zero_pad = dialog.result_zero_pad
+        normalize = dialog.result_normalize
+        output = dialog.result_output
+        # extract data slice for step 0 (first / only simulation step)
+        x = abscissa.values[from_index:to_index]
+        y = variable.step_values(0)[from_index:to_index]
+        # compute FFT using numpy
+        try:
+            frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output)
+        except ValueError:
+            # log exception and abort when computation fails
+            logger.exception("FFT computation failed for variable '%s'", variable.name)
+            return
+        # determine variable type based on FFT output
+        fft_variable_type = VariableType.PHASE if output == FftOutput.PHASE else VariableType.VOLTAGE
+        # guard against an unexpectedly empty result (compute_fft guarantees non-empty on success)
+        if len(frequencies) == 0:
+            # log error and abort
+            logger.error("FFT computation returned empty result for variable '%s'", variable.name)
+            return
+        # create frequency variable for the abscissa (index 0)
+        freq_variable = Variable(index=0, name="Frequency", type=VariableType.FREQUENCY, values=frequencies)
+        # name for the FFT result variable
+        fft_variable_name = f"FFT({variable.name})"
+        # create FFT result variable (index 1)
+        fft_variable = Variable(index=1, name=fft_variable_name, type=fft_variable_type, values=fft_values)
+        # create a synthetic QRawFile with frequency at index 0 and FFT values at index 1
+        fft_qraw = QRawFile(filename=Path(f"fft_{variable.name}.qraw"), title=f"FFT – {variable.name}", date="", plotname="FFT", complex=False, stepped=False, abscissa="", abscissa_min=float(frequencies[0]), abscissa_max=float(frequencies[-1]), abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=f"\xab{fft_variable_name}\xbb", num_points=len(frequencies), variables=[freq_variable, fft_variable])
+        # create a new MainWindow to render the FFT result using the existing infrastructure
+        fft_window = MainWindow(fft_qraw)
+        # keep reference alive to prevent garbage collection
+        self._fft_windows.append(fft_window)
+        # show the FFT result window
+        fft_window.show()
