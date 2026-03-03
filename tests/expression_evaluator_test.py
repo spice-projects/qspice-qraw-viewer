@@ -392,6 +392,8 @@ class TestExpressionEvaluator(TestCase):
         result = evaluator.evaluate(tree, context)
         # assert
         np.testing.assert_array_almost_equal(result.data, [2 * np.pi, 20 * np.pi, 200 * np.pi])
+        # 2 (dimensionless) × pi (dimensionless) × Frequency (Hz) → Hz
+        self.assertEqual(result.unit, "Hz")
 
     def test_evaluate_alias_conductance_times_voltage(self):
         # arrange — from '.alias I(R4) (1mho*V(out,0))' in Buck_COT_TRAN.qraw
@@ -405,6 +407,8 @@ class TestExpressionEvaluator(TestCase):
         result = evaluator.evaluate(tree, context)
         # assert — 1 mho * V equals V numerically (1 S × V gives current in A)
         np.testing.assert_array_almost_equal(result.data, [1.0, 2.0, 3.0])
+        # 1 (dimensionless) × mho (S) → S; S × V → A
+        self.assertEqual(result.unit, "A")
 
     def test_evaluate_alias_scientific_conductance_times_voltage(self):
         # arrange — from '.alias I(RCOT) (1e-05mho*V(in,n06))' in Buck_COT_TRAN.qraw
@@ -418,3 +422,5 @@ class TestExpressionEvaluator(TestCase):
         result = evaluator.evaluate(tree, context)
         # assert — 1e-05 S × V gives current scaled by 1e-05
         np.testing.assert_array_almost_equal(result.data, [1e-3, 2e-3, 3e-3])
+        # 1e-05 (dimensionless) × mho (S) → S; S × V → A
+        self.assertEqual(result.unit, "A")

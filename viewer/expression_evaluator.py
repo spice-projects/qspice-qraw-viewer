@@ -31,11 +31,13 @@ _FUNCTION_IMPLS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
 }
 
 
-# built-in numeric constants recognized as named identifiers in SPICE/QSPICE expressions;
-# includes standard math constants (pi) and SPICE unit names (.alias conductance suffix mho = 1 A/V)
-_CONSTANTS: dict[str, float] = {
-    "pi":  np.pi,
-    "mho": 1.0,
+# built-in numeric constants recognized as named identifiers in SPICE/QSPICE expressions.
+# Each entry is a (value, unit) pair so that unit propagation works correctly.
+# "pi" is a dimensionless mathematical constant; "mho" is the conductance unit (S = A/V) used
+# in QSPICE-generated .alias expressions such as '.alias I(R4) (1mho*V(out,0))'.
+_CONSTANTS: dict[str, tuple[float, str]] = {
+    "pi":  (np.pi, ""),
+    "mho": (1.0, "S"),
 }
 
 
@@ -47,6 +49,9 @@ def _propagate_binary_unit(left_unit: str, op: BinaryOp, right_unit: str) -> str
     if op == BinaryOp.MUL:
         if {left_unit, right_unit} == {"V", "A"}:
             return "W"
+        if {left_unit, right_unit} == {"S", "V"}:
+            # siemens × volt = ampere  (S = A/V  →  S·V = A)
+            return "A"
         # scalar (dimensionless) factor preserves the other operand's unit
         if left_unit == "":
             return right_unit
@@ -127,9 +132,10 @@ class ExpressionEvaluator:
         # variable reference: check built-in constants first (pi, mho), then look up in context;
         # built-in constants shadow any simulation variable with the same name (case-insensitive)
         if isinstance(node, VariableRefNode):
-            const = _CONSTANTS.get(node.name.lower())
-            if const is not None:
-                return np.array(const), ""
+            entry = _CONSTANTS.get(node.name.lower())
+            if entry is not None:
+                const_value, const_unit = entry
+                return np.array(const_value), const_unit
             var = self._lookup(node.name, context)
             return var.values, var.type.value.unit
         # function call: delegate to _eval_function
