@@ -143,11 +143,11 @@ class Chart:
             # set y axis range
             y_axis.setRange(y_min + y_top_ratio * (y_max - y_min), y_min + y_bottom_ratio * (y_max - y_min))
 
-    def update_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float, y_bottom_ratio: float):
+    def update_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
         # vertical changes flag
         vertical_changed = False
         # check vertical zoom ratios were provided
-        if y_top_ratio >= 0 and y_bottom_ratio >= 0:
+        if y_top_ratio is not None and y_bottom_ratio is not None:
             # current zoom window
             _, current_y_top_ratio, _, current_y_bottom_ratio = self._zoom_window
             # calculate new ratios based on the position of the mouse event within the chart panel and the current zoom window
@@ -172,11 +172,11 @@ class Chart:
             # set y axis range
             y_axis.setRange(y_min + y_top_ratio * (y_max - y_min), y_min + y_bottom_ratio * (y_max - y_min))
 
-    def reset_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float, y_bottom_ratio: float):
+    def reset_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
         # vertical changes flag
         vertical_changed = False
         # check vertical zoom ratios were provided
-        if y_top_ratio >= 0 and y_bottom_ratio >= 0:
+        if y_top_ratio is not None and y_bottom_ratio is not None:
             # update flag
             vertical_changed = y_top_ratio != self._zoom_window[1] or y_bottom_ratio != self._zoom_window[3]
             # update zoom window

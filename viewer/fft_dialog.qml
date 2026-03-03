@@ -7,21 +7,19 @@ Item {
     id: root
     anchors.fill: parent
 
-    // context properties injected by Python:
-    //   variableNames        : list of variable name strings
-    //   windowFunctions      : list of window function name strings
-    //   outputTypes          : list of output type name strings
-    //   zeroPaddingOptions   : list of zero-padding option strings
-    //   freqRangePreview     : string e.g. "0 Hz – 500 kHz (Nyquist)"
-    //   binWidthPreview      : string e.g. "9.77 Hz / bin"
-    //   abscissaMin          : float — earliest time in seconds
-    //   abscissaMax          : float — latest time in seconds
-    //   zoomFromTime         : float — left edge of current zoom window
-    //   zoomToTime           : float — right edge of current zoom window
+    // context properties injected by Python
+    property var variableNames: []
+    property var windowFunctions: []
+    property var outputTypes: []
+    property var zeroPaddingOptions: []
+    property string freqRangePreview: ""
+    property string binWidthPreview: ""
+    property real abscissaMin: 0
+    property real abscissaMax: 0
+    property real zoomFromTime: 0
+    property real zoomToTime: 0
 
-    signal dialogAccepted(string variableName, string windowFn, string zeroPad,
-                          string output, bool normalize, string rangeMode,
-                          real customFrom, real customTo)
+    signal dialogAccepted(string variableName, string windowFn, string zeroPad, string output, bool normalize, string rangeMode, real customFrom, real customTo)
     signal dialogRejected()
 
     // selected range mode: "all" | "zoom" | "custom"
@@ -69,7 +67,7 @@ Item {
                 ComboBox {
                     id: variableCombo
                     anchors { fill: parent; margins: 2 }
-                    model: variableNames
+                    model: root.variableNames
                     background: Rectangle { color: "transparent" }
                     contentItem: Text {
                         leftPadding: 8
@@ -79,16 +77,17 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     delegate: ItemDelegate {
+                        id: variableDelegate
                         required property string modelData
                         required property int index
                         width: variableCombo.width
                         contentItem: Text {
-                            text: modelData
+                            text: variableDelegate.modelData
                             color: "#b0b8c8"
                             font.pixelSize: 12
                         }
                         background: Rectangle {
-                            color: variableCombo.highlightedIndex === index ? "#3a3d4a" : "#252730"
+                            color: variableCombo.highlightedIndex === variableDelegate.index ? "#3a3d4a" : "#252730"
                         }
                     }
                     popup.background: Rectangle {
@@ -200,11 +199,11 @@ Item {
                             TextInput {
                                 id: fromField
                                 anchors { fill: parent; leftMargin: 8; rightMargin: 4 }
-                                text: zoomFromTime.toFixed(9)
+                                text: root.zoomFromTime.toFixed(9)
                                 color: "#dce8f8"
                                 font.pixelSize: 12
                                 verticalAlignment: Text.AlignVCenter
-                                validator: DoubleValidator { bottom: abscissaMin; top: abscissaMax }
+                                validator: DoubleValidator { bottom: root.abscissaMin; top: root.abscissaMax }
                                 selectByMouse: true
                             }
                         }
@@ -223,11 +222,11 @@ Item {
                             TextInput {
                                 id: toField
                                 anchors { fill: parent; leftMargin: 8; rightMargin: 4 }
-                                text: zoomToTime.toFixed(9)
+                                text: root.zoomToTime.toFixed(9)
                                 color: "#dce8f8"
                                 font.pixelSize: 12
                                 verticalAlignment: Text.AlignVCenter
-                                validator: DoubleValidator { bottom: abscissaMin; top: abscissaMax }
+                                validator: DoubleValidator { bottom: root.abscissaMin; top: root.abscissaMax }
                                 selectByMouse: true
                             }
                         }
@@ -257,7 +256,7 @@ Item {
                 ComboBox {
                     id: windowCombo
                     anchors { fill: parent; margins: 2 }
-                    model: windowFunctions
+                    model: root.windowFunctions
                     background: Rectangle { color: "transparent" }
                     contentItem: Text {
                         leftPadding: 8
@@ -267,16 +266,17 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     delegate: ItemDelegate {
+                        id: windowDelegate
                         required property string modelData
                         required property int index
                         width: windowCombo.width
                         contentItem: Text {
-                            text: modelData
+                            text: windowDelegate.modelData
                             color: "#b0b8c8"
                             font.pixelSize: 12
                         }
                         background: Rectangle {
-                            color: windowCombo.highlightedIndex === index ? "#3a3d4a" : "#252730"
+                            color: windowCombo.highlightedIndex === windowDelegate.index ? "#3a3d4a" : "#252730"
                         }
                     }
                     popup.background: Rectangle {
@@ -310,7 +310,7 @@ Item {
                 ComboBox {
                     id: zeroPadCombo
                     anchors { fill: parent; margins: 2 }
-                    model: zeroPaddingOptions
+                    model: root.zeroPaddingOptions
                     background: Rectangle { color: "transparent" }
                     contentItem: Text {
                         leftPadding: 8
@@ -320,16 +320,17 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     delegate: ItemDelegate {
+                        id: zeroPadDelegate
                         required property string modelData
                         required property int index
                         width: zeroPadCombo.width
                         contentItem: Text {
-                            text: modelData
+                            text: zeroPadDelegate.modelData
                             color: "#b0b8c8"
                             font.pixelSize: 12
                         }
                         background: Rectangle {
-                            color: zeroPadCombo.highlightedIndex === index ? "#3a3d4a" : "#252730"
+                            color: zeroPadCombo.highlightedIndex === zeroPadDelegate.index ? "#3a3d4a" : "#252730"
                         }
                     }
                     popup.background: Rectangle {
@@ -363,7 +364,7 @@ Item {
                 ComboBox {
                     id: outputCombo
                     anchors { fill: parent; margins: 2 }
-                    model: outputTypes
+                    model: root.outputTypes
                     background: Rectangle { color: "transparent" }
                     contentItem: Text {
                         leftPadding: 8
@@ -373,16 +374,17 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     delegate: ItemDelegate {
+                        id: outputDelegate
                         required property string modelData
                         required property int index
                         width: outputCombo.width
                         contentItem: Text {
-                            text: modelData
+                            text: outputDelegate.modelData
                             color: "#b0b8c8"
                             font.pixelSize: 12
                         }
                         background: Rectangle {
-                            color: outputCombo.highlightedIndex === index ? "#3a3d4a" : "#252730"
+                            color: outputCombo.highlightedIndex === outputDelegate.index ? "#3a3d4a" : "#252730"
                         }
                     }
                     popup.background: Rectangle {
@@ -480,13 +482,13 @@ Item {
                     Row {
                         spacing: 6
                         Text { text: "Frequency range:"; color: "#7a8599"; font.pixelSize: 11; width: 110 }
-                        Text { text: freqRangePreview; color: "#b0b8c8"; font.pixelSize: 11 }
+                        Text { text: root.freqRangePreview; color: "#b0b8c8"; font.pixelSize: 11 }
                     }
 
                     Row {
                         spacing: 6
                         Text { text: "Bin resolution:"; color: "#7a8599"; font.pixelSize: 11; width: 110 }
-                        Text { text: binWidthPreview; color: "#b0b8c8"; font.pixelSize: 11 }
+                        Text { text: root.binWidthPreview; color: "#b0b8c8"; font.pixelSize: 11 }
                     }
                 }
             }

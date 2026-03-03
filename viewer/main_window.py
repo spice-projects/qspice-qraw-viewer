@@ -155,7 +155,6 @@ class MainWindow(QMainWindow):
     @Slot(int, float, float, float)
     def _on_horizontal_zoom(self, chart_index: int, x_left_ratio: float, x_right_ratio: float, zoom_factor: float):
         # calculate horizontal axis indices from the supplied ratios
-        # convert ratios to indices and clamp to valid bounds before using
         total = len(self.qraw_file.variables[0].values)
         from_index = max(0, min(int(self._abscissa_from_index + x_left_ratio * (self._abscissa_to_index - self._abscissa_from_index)), total - 1))
         to_index = max(0, min(int(self._abscissa_from_index + x_right_ratio * (self._abscissa_to_index - self._abscissa_from_index)), total))
@@ -198,13 +197,11 @@ class MainWindow(QMainWindow):
         self._abscissa_to_index = to_index
         # update all charts — horizontal zoom is shared across all panels
         for chart in self._charts:
-            # update zoom window — pass -1 for Y to leave per-chart vertical zoom unchanged
-            chart.update_zoom_window(from_index, to_index, -1, -1)
+            # update zoom window — pass None for Y to leave per-chart vertical zoom unchanged
+            chart.update_zoom_window(from_index, to_index, None, None)
 
     @Slot(int, float, float)
     def _on_vertical_zoom(self, chart_index: int, y_top_ratio: float, y_bottom_ratio: float):
-        # log information
-        logger.debug("User requested vertical zoom on chart at index: %d, y=[%.3f, %.3f]", chart_index, y_top_ratio, y_bottom_ratio)
         # find chart at index
         chart = self._charts[chart_index]
         # update vertical zoom window only — pass -1 for horizontal indices to leave them unchanged
@@ -225,8 +222,8 @@ class MainWindow(QMainWindow):
                 chart.reset_zoom_window(self._abscissa_from_index, self._abscissa_to_index, 0.0, 1.0)
                 # next
                 continue
-            # update horizontal zoom window only, keep vertical zoom as is (use -1 to indicate no change)
-            chart.update_zoom_window(self._abscissa_from_index, self._abscissa_to_index, -1, -1)
+            # update horizontal zoom window only, keep vertical zoom as is
+            chart.update_zoom_window(self._abscissa_from_index, self._abscissa_to_index, None, None)
 
     @Slot(int)
     def _on_menu_autorange(self, chart_index: int):
@@ -249,7 +246,7 @@ class MainWindow(QMainWindow):
         # update charts
         for chart in self._charts:
             # update zoom window
-            chart.reset_zoom_window(self._abscissa_from_index, self._abscissa_to_index, -1, -1)
+            chart.reset_zoom_window(self._abscissa_from_index, self._abscissa_to_index, None, None)
 
     @Slot(int)
     def _on_menu_add_remove_plots(self, chart_index: int):

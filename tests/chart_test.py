@@ -112,8 +112,8 @@ class TestChart(TestCase):
         values = np.linspace(0.0, 1.0, 100)
         abscissa = Variable(0, "Time", VariableType.TIME, values, steps=1)
         chart = Chart(component, abscissa, 0, 100, 500)
-        # act — negative y ratios signal "no vertical change"
-        chart.update_zoom_window(10, 80, -1, -1)
+        # act — None signals "no vertical change"
+        chart.update_zoom_window(10, 80, None, None)
         # assert — only horizontal slice of zoom window changed
         self.assertEqual(chart._zoom_window[0], 10)
         self.assertAlmostEqual(chart._zoom_window[1], 0.0)
@@ -164,7 +164,7 @@ class TestChart(TestCase):
         abscissa = Variable(0, "Time", VariableType.TIME, values, steps=1)
         chart = Chart(component, abscissa, 0, 100, 500)
         # act
-        chart.reset_zoom_window(20, 70, -1, -1)
+        chart.reset_zoom_window(20, 70, None, None)
         # assert — horizontal indices updated, vertical unchanged
         self.assertEqual(chart._zoom_window[0], 20)
         self.assertAlmostEqual(chart._zoom_window[1], 0.0)
@@ -237,7 +237,7 @@ class TestChart(TestCase):
         abscissa = Variable(0, "Time", VariableType.TIME, values, steps=1)
         chart = Chart(component, abscissa, 0, 100, 500)
         # zoom in horizontally and vertically before clearing
-        chart.update_zoom_window(20, 80, -1, -1)
+        chart.update_zoom_window(20, 80, None, None)
         chart.update_zoom_window(-1, -1, 0.2, 0.8)
         # act
         chart.clear()

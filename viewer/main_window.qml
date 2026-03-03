@@ -306,6 +306,8 @@ Item {
 
             // last mouse X recorded during a pan drag — updated each frame so each delta is incremental
             property real panLastX: 0
+            // last mouse Y recorded during a pan drag — updated each frame so each delta is incremental
+            property real panLastY: 0
 
             // map a pixel X within the overlay to a 0-1 plot-area fraction (0=left, 1=right)
             function pixelToXRatio(px) {
@@ -346,17 +348,23 @@ Item {
                 cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
                 onPressed: (mouse) => {
-                    // record the starting X so the first positionChanged has a valid reference
+                    // record the starting X and Y so the first positionChanged has a valid reference
                     selectionOverlay.panLastX = mouse.x
+                    selectionOverlay.panLastY = mouse.y
                 }
 
                 onPositionChanged: (mouse) => {
-                    // compute how far the mouse moved as a fraction of the plot area width
-                    var delta = (mouse.x - selectionOverlay.panLastX) / graphsView.plotArea.width
-                    // update reference for the next incremental step
+                    // compute how far the mouse moved as a fraction of the plot area dimensions
+                    var dx = (mouse.x - selectionOverlay.panLastX) / graphsView.plotArea.width
+                    var dy = (mouse.y - selectionOverlay.panLastY) / graphsView.plotArea.height
+                    // update references for the next incremental step
                     selectionOverlay.panLastX = mouse.x
-                    // dragging right means pulling the data right — shift the window left
-                    panel.horizontalZoom(0 - delta, 1 - delta, 1)
+                    selectionOverlay.panLastY = mouse.y
+                    // dragging right means pulling the data right — shift the horizontal window left
+                    panel.horizontalZoom(0 - dx, 1 - dx, 1)
+                    // dragging down in screen space means pulling the data down — shift the vertical window up
+                    // screen Y is inverted vs data Y so the sign is opposite to horizontal
+                    panel.verticalZoom(dy, 1 + dy)
                 }
 
                 onDoubleClicked: panel.menuAutorange()
