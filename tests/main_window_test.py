@@ -15,7 +15,7 @@ sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
 # QMainWindow must be a concrete class so that MainWindow can genuinely inherit from it
 sys.modules["PySide6.QtWidgets"].QMainWindow = type("QMainWindow", (), {})
 
-from viewer.main_window import MainWindow  # noqa: E402
+from viewer.main_window import MainWindow, _format_value  # noqa: E402
 
 
 class TestMainWindow(TestCase):
@@ -146,3 +146,41 @@ class TestMainWindow(TestCase):
         # assert
         self.assertEqual(win._abscissa_from_index, 10)
         self.assertEqual(win._abscissa_to_index, 20)
+
+
+class TestFormatValue(TestCase):
+
+    def test_giga_prefix(self):
+        self.assertEqual(_format_value(2e9, "Hz"), "2 GHz")
+
+    def test_mega_prefix(self):
+        self.assertEqual(_format_value(1.5e6, "Hz"), "1.5 MHz")
+
+    def test_kilo_prefix(self):
+        self.assertEqual(_format_value(1000.0, "V"), "1 kV")
+
+    def test_no_prefix_plain(self):
+        self.assertEqual(_format_value(5.0, "V"), "5 V")
+
+    def test_milli_prefix(self):
+        self.assertEqual(_format_value(0.05, "A"), "50 mA")
+
+    def test_micro_prefix(self):
+        self.assertEqual(_format_value(1e-4, "A"), "100 µA")
+
+    def test_nano_prefix(self):
+        self.assertEqual(_format_value(1e-7, "s"), "100 ns")
+
+    def test_pico_prefix(self):
+        self.assertEqual(_format_value(1e-10, "F"), "100 pF")
+
+    def test_negative_value_giga(self):
+        result = _format_value(-3e9, "Hz")
+        self.assertIn("G", result)
+        self.assertIn("-", result)
+
+    def test_zero_value(self):
+        # zero has abs(0) < 1e-9 so it falls into the pico bucket
+        result = _format_value(0.0, "V")
+        self.assertIn("p", result)
+        self.assertIn("V", result)
