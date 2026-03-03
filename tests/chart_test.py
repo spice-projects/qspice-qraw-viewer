@@ -246,3 +246,90 @@ class TestChart(TestCase):
         self.assertAlmostEqual(chart._zoom_window[1], 0.0)
         self.assertEqual(chart._zoom_window[2], 80)
         self.assertAlmostEqual(chart._zoom_window[3], 1.0)
+
+    def test_sample_at_returns_empty_when_no_series(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 100)
+        abscissa = Variable(0, "Time", VariableType.TIME, values, steps=1)
+        chart = Chart(component, abscissa, 0, 100, 500)
+        # act
+        result = chart.sample_at(0.5)
+        # assert
+        self.assertEqual(result, [])
+
+    def test_sample_at_returns_name_unit_value_for_plotted_series(self):
+        # arrange
+        component = MagicMock()
+        abscissa_values = np.linspace(0.0, 1.0, 11)
+        abscissa = Variable(0, "Time", VariableType.TIME, abscissa_values, steps=1)
+        chart = Chart(component, abscissa, 0, 11, 500)
+        # ordinate: 11 linearly-spaced values from 0 to 100
+        ordinate_values = np.linspace(0.0, 100.0, 11)
+        vout = Variable(1, "Vout", VariableType.VOLTAGE, ordinate_values, steps=1)
+        mock_y_axis = MagicMock()
+        chart._series["Vout"] = (vout, [(vout, mock_y_axis, [], 0.0, 100.0)])
+        # act — sample at the right edge (x_ratio=1.0) should return the last value
+        result = chart.sample_at(1.0)
+        # assert
+        self.assertEqual(len(result), 1)
+        name, unit, value = result[0]
+        self.assertEqual(name, "Vout")
+        self.assertEqual(unit, "V")
+        self.assertAlmostEqual(value, 100.0)
+
+    def test_sample_at_nearest_sample_at_midpoint(self):
+        # arrange
+        component = MagicMock()
+        abscissa_values = np.linspace(0.0, 10.0, 11)
+        abscissa = Variable(0, "Time", VariableType.TIME, abscissa_values, steps=1)
+        chart = Chart(component, abscissa, 0, 11, 500)
+        # ordinate: index-valued array so we can easily verify which index was sampled
+        ordinate_values = np.arange(11, dtype=float)
+        vout = Variable(1, "Vout", VariableType.VOLTAGE, ordinate_values, steps=1)
+        mock_y_axis = MagicMock()
+        chart._series["Vout"] = (vout, [(vout, mock_y_axis, [], 0.0, 10.0)])
+        # act — x_ratio=0.5 with to_index=11: raw=round(0 + 0.5*11)=round(5.5)=6 (banker's rounding)
+        result = chart.sample_at(0.5)
+        # assert — nearest sample to the midpoint
+        _, _, value = result[0]
+        self.assertAlmostEqual(value, 6.0)
+
+    def test_sample_at_clamps_to_zoom_window(self):
+        # arrange
+        component = MagicMock()
+        abscissa_values = np.linspace(0.0, 10.0, 11)
+        abscissa = Variable(0, "Time", VariableType.TIME, abscissa_values, steps=1)
+        chart = Chart(component, abscissa, 2, 8, 500)
+        ordinate_values = np.arange(11, dtype=float)
+        vout = Variable(1, "Vout", VariableType.VOLTAGE, ordinate_values, steps=1)
+        mock_y_axis = MagicMock()
+        chart._series["Vout"] = (vout, [(vout, mock_y_axis, [], 0.0, 10.0)])
+        # act — x_ratio=0.0 must map to from_index=2, not index 0
+        result_left = chart.sample_at(0.0)
+        # x_ratio=1.0 must map to to_index-1=7
+        result_right = chart.sample_at(1.0)
+        # assert
+        _, _, left_val = result_left[0]
+        _, _, right_val = result_right[0]
+        self.assertAlmostEqual(left_val, 2.0)
+        self.assertAlmostEqual(right_val, 7.0)
+
+    def test_sample_at_multiple_series(self):
+        # arrange
+        component = MagicMock()
+        abscissa_values = np.linspace(0.0, 1.0, 5)
+        abscissa = Variable(0, "Time", VariableType.TIME, abscissa_values, steps=1)
+        chart = Chart(component, abscissa, 0, 5, 500)
+        vout = Variable(1, "Vout", VariableType.VOLTAGE, np.array([10.0, 20.0, 30.0, 40.0, 50.0]), steps=1)
+        iout = Variable(2, "Iout", VariableType.CURRENT, np.array([1.0, 2.0, 3.0, 4.0, 5.0]), steps=1)
+        mock_axis = MagicMock()
+        chart._series["Vout"] = (vout, [(vout, mock_axis, [], 10.0, 50.0)])
+        chart._series["Iout"] = (iout, [(iout, mock_axis, [], 1.0, 5.0)])
+        # act — x_ratio=0.0 → index 0
+        result = chart.sample_at(0.0)
+        # assert — two entries returned, one per series
+        self.assertEqual(len(result), 2)
+        names = {r[0] for r in result}
+        self.assertIn("Vout", names)
+        self.assertIn("Iout", names)

@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
@@ -19,6 +20,29 @@ _QML_FILE = Path(__file__).parent / "main_window.qml"
 
 # background color matching the chart dark theme
 _BG = "#1a1b1e"
+
+# minimum interval between status-bar updates (≈30 fps)
+_MIN_STATUS_INTERVAL = 1.0 / 30
+
+
+def _format_value(value: float, unit: str) -> str:
+    """Format a numeric value with SI prefix and unit, mirroring the QML applyUnit function."""
+    abs_val = abs(value)
+    if abs_val >= 1e9:
+        return f"{value / 1e9:.2f} G{unit}"
+    if abs_val >= 1e6:
+        return f"{value / 1e6:.2f} M{unit}"
+    if abs_val >= 1e3:
+        return f"{value / 1e3:.2f} k{unit}"
+    if abs_val < 1e-9:
+        return f"{value * 1e12:.2f} p{unit}"
+    if abs_val < 1e-6:
+        return f"{value * 1e9:.2f} n{unit}"
+    if abs_val < 1e-3:
+        return f"{value * 1e6:.2f} µ{unit}"
+    if abs_val < 0.09:
+        return f"{value * 1e3:.2f} m{unit}"
+    return f"{value:.2f} {unit}"
 
 
 class MainWindow(QMainWindow):
@@ -52,6 +76,8 @@ class MainWindow(QMainWindow):
         # decimation target — physical pixels of the primary screen width
         screen = QGuiApplication.primaryScreen()
         self._decimate_target = screen.size().width() * max(5, int(screen.devicePixelRatio()))
+        # throttle timestamp for status bar updates
+        self._last_status_time: float = 0.0
 
     def sizeHint(self):
         return QSize(1200, 800)
@@ -74,6 +100,9 @@ class MainWindow(QMainWindow):
         self._root.menuAddWindow.connect(self._on_menu_add_window)
         self._root.menuDeleteWindow.connect(self._on_menu_delete_window)
         self._root.menuFft.connect(self._on_menu_fft)
+        # connect pointer hover signals to update the status bar
+        self._root.pointerMoved.connect(self._on_pointer_moved)
+        self._root.pointerExited.connect(self._on_pointer_exited)
         # populate charts after the event loop starts so the window is visible first
         QTimer.singleShot(0, self._populate_charts)
 
@@ -349,3 +378,37 @@ class MainWindow(QMainWindow):
         self._fft_windows.append(fft_window)
         # show the FFT result window
         fft_window.show()
+
+    @Slot(int, float)
+    def _on_pointer_moved(self, chart_index: int, x_ratio: float):
+        # throttle updates to ~30 fps to avoid saturating the UI thread
+        now = time.monotonic()
+        if now - self._last_status_time < _MIN_STATUS_INTERVAL:
+            return
+        self._last_status_time = now
+        # guard against invalid chart index
+        if chart_index < 0 or chart_index >= len(self._charts):
+            return
+        chart = self._charts[chart_index]
+        # compute abscissa index within the current zoom window
+        from_index, _, to_index, _ = chart._zoom_window
+        idx = max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
+        # retrieve the stored abscissa value (may be in log space for decade/octave scales)
+        abscissa = self.qraw_file.variables[0]
+        x_stored = float(abscissa.values[idx])
+        # convert stored value back to physical abscissa value
+        if self.qraw_file.abscissa_scale == AbscissaScale.DECADE:
+            x_actual = 10 ** x_stored
+        elif self.qraw_file.abscissa_scale == AbscissaScale.OCTAVE:
+            x_actual = 2 ** x_stored
+        else:
+            x_actual = x_stored
+        # compose status string: x value then one token per y series
+        parts = [f"{abscissa.name} = {_format_value(x_actual, abscissa.type.value.unit)}"]
+        for name, unit, value in chart.sample_at(x_ratio):
+            parts.append(f"{name} = {_format_value(value, unit)}")
+        self.statusBar().showMessage("    ".join(parts))
+
+    @Slot(int)
+    def _on_pointer_exited(self, chart_index: int):
+        self.statusBar().clearMessage()

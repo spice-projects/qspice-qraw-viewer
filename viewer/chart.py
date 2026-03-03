@@ -217,6 +217,25 @@ class Chart:
         # release stash after Qt finishes its async processing
         QTimer.singleShot(1000, lambda: (old_series.clear(), old_axes.clear(), old_variables.clear()))
 
+    def sample_at(self, x_ratio: float) -> list[tuple[str, str, float]]:
+        """Return (name, unit, value) tuples for all plotted ordinate series at a given x-axis position.
+
+        x_ratio is a 0-1 fraction of the current zoom window (0 = left edge, 1 = right edge).
+        Values are sampled from step 0 using nearest-sample lookup on the full-resolution data.
+        """
+        if not self._series:
+            return []
+        # compute the nearest sample index within the current zoom window
+        from_index, _, to_index, _ = self._zoom_window
+        idx = max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
+        # collect one (name, unit, value) tuple per plotted variant (magnitude/phase counted separately)
+        result: list[tuple[str, str, float]] = []
+        for _, (_, ordinate_series) in self._series.items():
+            for ordinate_variant, _, _, _, _ in ordinate_series:
+                value = float(ordinate_variant.step_values(0)[idx])
+                result.append((ordinate_variant.name, ordinate_variant.type.value.unit, value))
+        return result
+
     def _get_y_axis(self, variable_type: VariableType) -> QAbstractAxis | None:
         # existing axis for variable type
         axis = self._y_axes.get(variable_type)

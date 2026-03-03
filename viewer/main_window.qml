@@ -32,6 +32,8 @@ Item {
     signal menuAddWindow(int chartIndex)
     signal menuDeleteWindow(int chartIndex)
     signal menuFft(int chartIndex)
+    signal pointerMoved(int chartIndex, real xRatio)
+    signal pointerExited(int chartIndex)
 
     component ChartPanel: Item {
         id: panel
@@ -55,6 +57,8 @@ Item {
         signal menuDeleteWindow()
         // carries panel-local mouse coords so the root can position the shared menu
         signal menuOpenRequested(real localX, real localY, int seriesCount, bool isTimeDomain)
+        signal pointerMoved(real xRatio)
+        signal pointerExited()
 
         // thin divider drawn above every panel except the first
         Rectangle {
@@ -344,6 +348,8 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton
+                // enable hover so onPositionChanged fires without a button held down
+                hoverEnabled: true
                 // show grab cursor while hovering so the interaction is discoverable
                 cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
@@ -354,18 +360,24 @@ Item {
                 }
 
                 onPositionChanged: (mouse) => {
-                    // compute how far the mouse moved as a fraction of the plot area dimensions
-                    var dx = (mouse.x - selectionOverlay.panLastX) / graphsView.plotArea.width
-                    var dy = (mouse.y - selectionOverlay.panLastY) / graphsView.plotArea.height
-                    // update references for the next incremental step
-                    selectionOverlay.panLastX = mouse.x
-                    selectionOverlay.panLastY = mouse.y
-                    // dragging right means pulling the data right — shift the horizontal window left
-                    panel.horizontalZoom(0 - dx, 1 - dx, 1)
-                    // dragging down in screen space means pulling the data down — shift the vertical window up
-                    // screen Y is inverted vs data Y so the sign is opposite to horizontal
-                    panel.verticalZoom(dy, 1 + dy)
+                    if (pressed) {
+                        // compute how far the mouse moved as a fraction of the plot area dimensions
+                        var dx = (mouse.x - selectionOverlay.panLastX) / graphsView.plotArea.width
+                        var dy = (mouse.y - selectionOverlay.panLastY) / graphsView.plotArea.height
+                        // update references for the next incremental step
+                        selectionOverlay.panLastX = mouse.x
+                        selectionOverlay.panLastY = mouse.y
+                        // dragging right means pulling the data right — shift the horizontal window left
+                        panel.horizontalZoom(0 - dx, 1 - dx, 1)
+                        // dragging down in screen space means pulling the data down — shift the vertical window up
+                        // screen Y is inverted vs data Y so the sign is opposite to horizontal
+                        panel.verticalZoom(dy, 1 + dy)
+                    }
+                    // always report pointer position to the status bar
+                    panel.pointerMoved(selectionOverlay.pixelToXRatio(mouse.x))
                 }
+
+                onExited: panel.pointerExited()
 
                 onDoubleClicked: panel.menuAutorange()
             }
@@ -605,6 +617,9 @@ Item {
                 onMenuAddRemovePlots:     root.menuAddRemovePlots(index)
                 onMenuDeleteAllPlots:     root.menuDeleteAllPlots(index)
                 onMenuDeleteWindow:       root.menuDeleteWindow(index)
+                // bubble pointer hover signals up to root, adding chartIndex
+                onPointerMoved: (xRatio) => root.pointerMoved(index, xRatio)
+                onPointerExited: root.pointerExited(index)
                 // position and reveal the single shared context menu on right-click
                 onMenuOpenRequested: (localX, localY, sc, itd) => {
                     // map from panel-local coordinates to root-local coordinates
