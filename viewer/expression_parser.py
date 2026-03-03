@@ -152,7 +152,18 @@ class ExpressionParser:
         # numeric literal
         if tok.type == "NUMBER":
             self._consume()
-            return NumberNode(float(tok.value))
+            value = float(tok.value)
+            # implicit multiplication: NUMBER directly followed by a bare IDENT — handles
+            # SPICE unit suffixes such as 'mho' in expressions like '1mho*V(out,0)'
+            next_tok = self._peek()
+            if next_tok and next_tok.type == "IDENT":
+                lookahead_pos = self._pos + 1
+                after_ident = self._tokens[lookahead_pos] if lookahead_pos < len(self._tokens) else None
+                # only treat as implicit multiplication when the IDENT is not a function call (not followed by '(')
+                if after_ident is None or after_ident.type != "LPAREN":
+                    self._consume()
+                    return BinaryOpNode(NumberNode(value), BinaryOp.MUL, VariableRefNode(next_tok.value))
+            return NumberNode(value)
         # identifier — either a function call or a bare variable reference
         if tok.type == "IDENT":
             self._consume()

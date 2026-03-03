@@ -380,3 +380,41 @@ class TestExpressionEvaluator(TestCase):
         expected = vr1.values / ir1.values
         np.testing.assert_array_almost_equal(result.data, expected)
         self.assertEqual(result.unit, "Ω")
+
+    def test_evaluate_alias_omega_expression(self):
+        # arrange — from '.alias Omega (2*pi*Frequency)' in VRM_GainBW.qraw / Buck_COT_Bode.qraw
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        freq = _make_var("Frequency", VariableType.FREQUENCY, [1.0, 10.0, 100.0])
+        context = {"Frequency": freq}
+        tree = parser.parse("(2*pi*Frequency)")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [2 * np.pi, 20 * np.pi, 200 * np.pi])
+
+    def test_evaluate_alias_conductance_times_voltage(self):
+        # arrange — from '.alias I(R4) (1mho*V(out,0))' in Buck_COT_TRAN.qraw
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        # variable name matches what the parser reconstructs from V(out,0)
+        vout = _make_var("V(out, 0)", VariableType.VOLTAGE, [1.0, 2.0, 3.0])
+        context = {"V(out, 0)": vout}
+        tree = parser.parse("(1mho*V(out,0))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — 1 mho * V equals V numerically (1 S × V gives current in A)
+        np.testing.assert_array_almost_equal(result.data, [1.0, 2.0, 3.0])
+
+    def test_evaluate_alias_scientific_conductance_times_voltage(self):
+        # arrange — from '.alias I(RCOT) (1e-05mho*V(in,n06))' in Buck_COT_TRAN.qraw
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        # variable name matches what the parser reconstructs from V(in,n06)
+        vin = _make_var("V(in, n06)", VariableType.VOLTAGE, [100.0, 200.0, 300.0])
+        context = {"V(in, n06)": vin}
+        tree = parser.parse("(1e-05mho*V(in,n06))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — 1e-05 S × V gives current scaled by 1e-05
+        np.testing.assert_array_almost_equal(result.data, [1e-3, 2e-3, 3e-3])

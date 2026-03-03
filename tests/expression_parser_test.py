@@ -242,3 +242,65 @@ class TestExpressionParser(TestCase):
         # act / assert
         with self.assertRaises(ValueError):
             parser.parse("()")
+
+    def test_parse_alias_bare_variable_reference(self):
+        # arrange — from '.alias Freq Frequency' in VRM_GainBW.qraw / Buck_COT_Bode.qraw
+        parser = ExpressionParser()
+        # act
+        node = parser.parse("Frequency")
+        # assert
+        self.assertIsInstance(node, VariableRefNode)
+        self.assertEqual(node.name, "Frequency")
+
+    def test_parse_alias_omega_expression(self):
+        # arrange — from '.alias Omega (2*pi*Frequency)' in VRM_GainBW.qraw / Buck_COT_Bode.qraw
+        parser = ExpressionParser()
+        # act
+        node = parser.parse("(2*pi*Frequency)")
+        # assert
+        self.assertIsInstance(node, BinaryOpNode)
+        self.assertEqual(node.op, BinaryOp.MUL)
+        self.assertIsInstance(node.left, BinaryOpNode)
+        self.assertEqual(node.left.op, BinaryOp.MUL)
+        self.assertIsInstance(node.left.left, NumberNode)
+        self.assertEqual(node.left.left.value, 2.0)
+        self.assertIsInstance(node.left.right, VariableRefNode)
+        self.assertEqual(node.left.right.name, "pi")
+        self.assertIsInstance(node.right, VariableRefNode)
+        self.assertEqual(node.right.name, "Frequency")
+
+    def test_parse_alias_conductance_times_voltage(self):
+        # arrange — from '.alias I(R4) (1mho*V(out,0))' in Buck_COT_TRAN.qraw
+        parser = ExpressionParser()
+        # act
+        node = parser.parse("(1mho*V(out,0))")
+        # assert — outer is multiplication, left is implicit 1*mho, right is V(out, 0)
+        self.assertIsInstance(node, BinaryOpNode)
+        self.assertEqual(node.op, BinaryOp.MUL)
+        self.assertIsInstance(node.left, BinaryOpNode)
+        self.assertEqual(node.left.op, BinaryOp.MUL)
+        self.assertIsInstance(node.left.left, NumberNode)
+        self.assertEqual(node.left.left.value, 1.0)
+        self.assertIsInstance(node.left.right, VariableRefNode)
+        self.assertEqual(node.left.right.name, "mho")
+        self.assertIsInstance(node.right, VariableRefNode)
+        # parser normalizes argument spacing: V(out,0) → "V(out, 0)" (comma + space)
+        self.assertEqual(node.right.name, "V(out, 0)")
+
+    def test_parse_alias_scientific_conductance_times_voltage(self):
+        # arrange — from '.alias I(RCOT) (1e-05mho*V(in,n06))' in Buck_COT_TRAN.qraw
+        parser = ExpressionParser()
+        # act
+        node = parser.parse("(1e-05mho*V(in,n06))")
+        # assert — outer is multiplication, left is implicit 1e-05*mho, right is V(in, n06)
+        self.assertIsInstance(node, BinaryOpNode)
+        self.assertEqual(node.op, BinaryOp.MUL)
+        self.assertIsInstance(node.left, BinaryOpNode)
+        self.assertEqual(node.left.op, BinaryOp.MUL)
+        self.assertIsInstance(node.left.left, NumberNode)
+        self.assertAlmostEqual(node.left.left.value, 1e-05)
+        self.assertIsInstance(node.left.right, VariableRefNode)
+        self.assertEqual(node.left.right.name, "mho")
+        self.assertIsInstance(node.right, VariableRefNode)
+        # parser normalizes argument spacing: V(in,n06) → "V(in, n06)" (comma + space)
+        self.assertEqual(node.right.name, "V(in, n06)")
