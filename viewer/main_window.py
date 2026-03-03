@@ -29,20 +29,20 @@ def _format_value(value: float, unit: str) -> str:
     """Format a numeric value with SI prefix and unit, mirroring the QML applyUnit function."""
     abs_val = abs(value)
     if abs_val >= 1e9:
-        return f"{value / 1e9:.3g} G{unit}"
+        return f"{value / 1e9:.2f} G{unit}"
     if abs_val >= 1e6:
-        return f"{value / 1e6:.3g} M{unit}"
+        return f"{value / 1e6:.2f} M{unit}"
     if abs_val >= 1e3:
-        return f"{value / 1e3:.3g} k{unit}"
+        return f"{value / 1e3:.2f} k{unit}"
     if abs_val < 1e-9:
-        return f"{value * 1e12:.3g} p{unit}"
+        return f"{value * 1e12:.2f} p{unit}"
     if abs_val < 1e-6:
-        return f"{value * 1e9:.3g} n{unit}"
+        return f"{value * 1e9:.2f} n{unit}"
     if abs_val < 1e-3:
-        return f"{value * 1e6:.3g} µ{unit}"
+        return f"{value * 1e6:.2f} µ{unit}"
     if abs_val < 0.09:
-        return f"{value * 1e3:.3g} m{unit}"
-    return f"{value:.3g} {unit}"
+        return f"{value * 1e3:.2f} m{unit}"
+    return f"{value:.2f} {unit}"
 
 
 class MainWindow(QMainWindow):
@@ -404,7 +404,7 @@ class MainWindow(QMainWindow):
         else:
             x_actual = x_stored
         # compose status string: x value then one token per y series
-        parts = [f"x = {_format_value(x_actual, abscissa.type.value.unit)}"]
+        parts = [f"{abscissa.name} = {_format_value(x_actual, abscissa.type.value.unit)}"]
         for name, unit, value in chart.sample_at(x_ratio):
             parts.append(f"{name} = {_format_value(value, unit)}")
         self.statusBar().showMessage("    ".join(parts))

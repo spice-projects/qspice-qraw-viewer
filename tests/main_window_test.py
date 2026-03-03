@@ -151,28 +151,28 @@ class TestMainWindow(TestCase):
 class TestFormatValue(TestCase):
 
     def test_giga_prefix(self):
-        self.assertEqual(_format_value(2e9, "Hz"), "2 GHz")
+        self.assertEqual(_format_value(2e9, "Hz"), "2.00 GHz")
 
     def test_mega_prefix(self):
-        self.assertEqual(_format_value(1.5e6, "Hz"), "1.5 MHz")
+        self.assertEqual(_format_value(1.5e6, "Hz"), "1.50 MHz")
 
     def test_kilo_prefix(self):
-        self.assertEqual(_format_value(1000.0, "V"), "1 kV")
+        self.assertEqual(_format_value(1000.0, "V"), "1.00 kV")
 
     def test_no_prefix_plain(self):
-        self.assertEqual(_format_value(5.0, "V"), "5 V")
+        self.assertEqual(_format_value(5.0, "V"), "5.00 V")
 
     def test_milli_prefix(self):
-        self.assertEqual(_format_value(0.05, "A"), "50 mA")
+        self.assertEqual(_format_value(0.05, "A"), "50.00 mA")
 
     def test_micro_prefix(self):
-        self.assertEqual(_format_value(1e-4, "A"), "100 µA")
+        self.assertEqual(_format_value(1e-4, "A"), "100.00 µA")
 
     def test_nano_prefix(self):
-        self.assertEqual(_format_value(1e-7, "s"), "100 ns")
+        self.assertEqual(_format_value(1e-7, "s"), "100.00 ns")
 
     def test_pico_prefix(self):
-        self.assertEqual(_format_value(1e-10, "F"), "100 pF")
+        self.assertEqual(_format_value(1e-10, "F"), "100.00 pF")
 
     def test_negative_value_giga(self):
         result = _format_value(-3e9, "Hz")
