@@ -6,45 +6,30 @@ from collections.abc import Callable
 import numpy as np
 
 from .expression import Expression
-from .expression_node import (
-    BinaryOp,
-    BinaryOpNode,
-    ExprNode,
-    FunctionCallNode,
-    NumberNode,
-    UnaryOp,
-    UnaryOpNode,
-    VariableRefNode,
-)
+from .expression_node import BinaryOp, BinaryOpNode, ExprNode, FunctionCallNode, NumberNode, UnaryOp, UnaryOpNode, VariableRefNode
 from .variable import Variable
 
-# ---------------------------------------------------------------------------
-# Supported mathematical functions
-# ---------------------------------------------------------------------------
-
-# Maps lower-cased function name → callable that accepts an ndarray and
-# returns an ndarray.  All functions must handle complex inputs gracefully
-# because AC analysis variables are complex-valued.
+# maps lower-cased function name to a callable that accepts an ndarray and
+# returns an ndarray; all functions must handle complex inputs gracefully
+# because AC analysis variables are complex-valued
 _FUNCTION_IMPLS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
-    "abs":    np.abs,
-    "sqrt":   np.sqrt,
-    "log":    np.log10,   # SPICE convention: log ≡ log10
-    "log10":  np.log10,
-    "ln":     np.log,
-    "db":     lambda x: 20.0 * np.log10(np.abs(x)),
-    "real":   np.real,
-    "imag":   np.imag,
-    "angle":  lambda x: np.angle(x, deg=True),
-    "mag":    np.abs,
-    "sin":    np.sin,
-    "cos":    np.cos,
-    "tan":    np.tan,
-    "exp":    np.exp,
+    "abs":   np.abs,
+    "sqrt":  np.sqrt,
+    # in SPICE, log is an alias for log10
+    "log":   np.log10,
+    "log10": np.log10,
+    "ln":    np.log,
+    "db":    lambda x: 20.0 * np.log10(np.abs(x)),
+    "real":  np.real,
+    "imag":  np.imag,
+    "angle": lambda x: np.angle(x, deg=True),
+    "mag":   np.abs,
+    "sin":   np.sin,
+    "cos":   np.cos,
+    "tan":   np.tan,
+    "exp":   np.exp,
 }
 
-# ---------------------------------------------------------------------------
-# Unit propagation helpers
-# ---------------------------------------------------------------------------
 
 def _propagate_binary_unit(left_unit: str, op: BinaryOp, right_unit: str) -> str:
     """Infer the resulting physical unit of a binary operation."""
@@ -62,15 +47,17 @@ def _propagate_binary_unit(left_unit: str, op: BinaryOp, right_unit: str) -> str
         return ""
     if op == BinaryOp.DIV:
         if left_unit == right_unit:
-            return ""  # dimensionless ratio
+            # dimensionless ratio
+            return ""
         if left_unit == "V" and right_unit == "A":
             return "Ω"
         if left_unit == "A" and right_unit == "V":
             return "S"
         if right_unit == "":
-            return left_unit  # divide by scalar
+            # divide by scalar
+            return left_unit
         return ""
-    # POW — unit tracking for arbitrary exponents is not well-defined
+    # pow — unit tracking for arbitrary exponents is not well-defined
     return ""
 
 
@@ -89,10 +76,6 @@ def _function_unit(func_name: str, arg_unit: str) -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Evaluator
-# ---------------------------------------------------------------------------
-
 class ExpressionEvaluator:
     """Stateless service that walks an expression AST and returns an
     :class:`~viewer.expression.Expression`.
@@ -108,17 +91,7 @@ class ExpressionEvaluator:
         # result.unit == "Ω"
     """
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def evaluate(
-        self,
-        node: ExprNode,
-        context: dict[str, Variable],
-        name: str | None = None,
-        source: str | None = None,
-    ) -> Expression:
+    def evaluate(self, node: ExprNode, context: dict[str, Variable], name: str | None = None, source: str | None = None) -> Expression:
         """Evaluate *node* against *context* and return an :class:`~viewer.expression.Expression`.
 
         :param node:    Root AST node returned by :class:`~viewer.expression_parser.ExpressionParser`.
@@ -131,54 +104,53 @@ class ExpressionEvaluator:
         :raises ValueError: If a variable is not found in *context* or an unknown
                             function is encountered.
         """
+        # evaluate the AST and propagate units
         data, unit = self._eval(node, context)
+        # use the provided name or reconstruct one from the AST
         expr_name = name if name is not None else self._node_to_str(node)
+        # exit
         return Expression(expr_name, data, unit, source=source if source is not None else expr_name)
-
-    # ------------------------------------------------------------------
-    # Internal evaluation
-    # ------------------------------------------------------------------
 
     def _eval(self, node: ExprNode, context: dict[str, Variable]) -> tuple[np.ndarray, str]:
         """Recursively evaluate *node*, returning ``(data_array, unit_string)``."""
+        # number literal evaluates to a scalar array with empty unit
         if isinstance(node, NumberNode):
             return np.array(node.value), ""
-
+        # variable reference: look up in context and return its values and unit
         if isinstance(node, VariableRefNode):
             var = self._lookup(node.name, context)
             return var.values, var.type.value.unit
-
+        # function call: delegate to _eval_function
         if isinstance(node, FunctionCallNode):
             return self._eval_function(node, context)
-
+        # binary operation: evaluate both sides, apply the operator, and propagate units
         if isinstance(node, BinaryOpNode):
             left_data, left_unit = self._eval(node.left, context)
             right_data, right_unit = self._eval(node.right, context)
             data = self._apply_binary_op(node.op, left_data, right_data)
             unit = _propagate_binary_unit(left_unit, node.op, right_unit)
             return data, unit
-
+        # unary operation: evaluate the operand and apply the unary operator
         if isinstance(node, UnaryOpNode):
             data, unit = self._eval(node.operand, context)
             if node.op == UnaryOp.NEG:
                 return -data, unit
             raise ValueError(f"unsupported unary operator: {node.op}")
-
         raise ValueError(f"unknown AST node type: {type(node).__name__}")
 
-    def _eval_function(
-        self, node: FunctionCallNode, context: dict[str, Variable]
-    ) -> tuple[np.ndarray, str]:
+    def _eval_function(self, node: FunctionCallNode, context: dict[str, Variable]) -> tuple[np.ndarray, str]:
+        # look up the function implementation
         func = _FUNCTION_IMPLS.get(node.name.lower())
+        # raise if the function is not supported
         if func is None:
             raise ValueError(f"unknown function: {node.name!r}")
+        # raise if the argument count is wrong
         if len(node.args) != 1:
-            raise ValueError(
-                f"function {node.name!r} expects exactly 1 argument, got {len(node.args)}"
-            )
+            raise ValueError(f"function {node.name!r} expects exactly 1 argument, got {len(node.args)}")
         arg_data, arg_unit = self._eval(node.args[0], context)
         result_data = func(arg_data)
         result_unit = _function_unit(node.name, arg_unit)
+        # exit
         return result_data, result_unit
 
     @staticmethod
@@ -198,18 +170,16 @@ class ExpressionEvaluator:
     @staticmethod
     def _lookup(name: str, context: dict[str, Variable]) -> Variable:
         """Look up *name* in *context* with case-insensitive fallback."""
+        # try an exact match first
         var = context.get(name)
         if var is not None:
             return var
+        # fall back to a case-insensitive scan
         lower = name.lower()
         for key, v in context.items():
             if key.lower() == lower:
                 return v
         raise ValueError(f"undefined variable: {name!r}")
-
-    # ------------------------------------------------------------------
-    # AST → string reconstruction (used for default expression names)
-    # ------------------------------------------------------------------
 
     def _node_to_str(self, node: ExprNode) -> str:
         """Reconstruct a human-readable string from an AST node."""

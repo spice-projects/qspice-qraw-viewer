@@ -65,5 +65,5 @@ class UnaryOpNode:
     operand: ExprNode
 
 
-# Union type for all AST nodes
+# union type for all AST nodes
 ExprNode = Union[NumberNode, VariableRefNode, FunctionCallNode, BinaryOpNode, UnaryOpNode]

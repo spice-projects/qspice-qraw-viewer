@@ -4,50 +4,20 @@ from __future__ import annotations
 import re
 from typing import NamedTuple
 
-from .expression_node import (
-    BinaryOp,
-    BinaryOpNode,
-    ExprNode,
-    FunctionCallNode,
-    NumberNode,
-    UnaryOp,
-    UnaryOpNode,
-    VariableRefNode,
-)
+from .expression_node import BinaryOp, BinaryOpNode, ExprNode, FunctionCallNode, NumberNode, UnaryOp, UnaryOpNode, VariableRefNode
 
-# Known mathematical functions that accept expressions as arguments.
-# Everything else of the form  IDENT(...)  is treated as a SPICE variable
-# reference whose full text (e.g. "V(out)", "I(R1,0)") is the lookup key.
-_MATH_FUNCTIONS: frozenset[str] = frozenset({
-    "abs", "sqrt", "log", "log10", "ln",
-    "db", "dB",
-    "real", "imag", "angle", "mag",
-    "sin", "cos", "tan",
-    "exp",
-})
+# known mathematical functions that accept expressions as arguments;
+# everything else of the form IDENT(...) is treated as a SPICE variable
+# reference whose full text (e.g. "V(out)", "I(R1,0)") is the lookup key
+_MATH_FUNCTIONS: frozenset[str] = frozenset({"abs", "sqrt", "log", "log10", "ln", "db", "dB", "real", "imag", "angle", "mag", "sin", "cos", "tan", "exp"})
 
-# ---------------------------------------------------------------------------
-# Tokenizer
-# ---------------------------------------------------------------------------
 
 class _Token(NamedTuple):
     type: str
     value: str
 
 
-_TOKEN_RE = re.compile(
-    r"(?P<NUMBER>\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)"
-    r"|(?P<IDENT>[A-Za-z_][A-Za-z0-9_\[\]]*)"
-    r"|(?P<LPAREN>\()"
-    r"|(?P<RPAREN>\))"
-    r"|(?P<COMMA>,)"
-    r"|(?P<PLUS>\+)"
-    r"|(?P<MINUS>-)"
-    r"|(?P<STAR>\*)"
-    r"|(?P<SLASH>/)"
-    r"|(?P<CARET>\^)"
-    r"|(?P<SPACE>\s+)"
-)
+_TOKEN_RE = re.compile(r"(?P<NUMBER>\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)|(?P<IDENT>[A-Za-z_][A-Za-z0-9_\[\]]*)|(?P<LPAREN>\()|(?P<RPAREN>\))|(?P<COMMA>,)|(?P<PLUS>\+)|(?P<MINUS>-)|(?P<STAR>\*)|(?P<SLASH>/)|(?P<CARET>\^)|(?P<SPACE>\s+)")
 
 
 def _tokenize(text: str) -> list[_Token]:
@@ -55,19 +25,18 @@ def _tokenize(text: str) -> list[_Token]:
     pos = 0
     while pos < len(text):
         m = _TOKEN_RE.match(text, pos)
+        # raise if no token matched at the current position
         if m is None:
             raise ValueError(f"unexpected character {text[pos]!r} at position {pos}")
         pos = m.end()
         kind = m.lastgroup
+        # skip whitespace tokens
         if kind == "SPACE":
             continue
         tokens.append(_Token(kind, m.group()))
+    # exit
     return tokens
 
-
-# ---------------------------------------------------------------------------
-# Parser
-# ---------------------------------------------------------------------------
 
 class ExpressionParser:
     """Stateless recursive-descent parser for waveform expressions.
@@ -93,10 +62,6 @@ class ExpressionParser:
     with their arguments parsed as full sub-expressions.
     """
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def parse(self, text: str) -> ExprNode:
         """Parse *text* into an expression tree.
 
@@ -104,113 +69,128 @@ class ExpressionParser:
         :returns: Root :class:`~viewer.expression_node.ExprNode` of the AST.
         :raises ValueError: If the expression contains a syntax error.
         """
+        # tokenize the input and reset the position cursor
         self._tokens: list[_Token] = _tokenize(text)
         self._pos: int = 0
+        # parse the full expression starting at the additive level
         node = self._parse_additive()
+        # any remaining tokens indicate a syntax error
         if self._pos < len(self._tokens):
             raise ValueError(f"unexpected token {self._tokens[self._pos].value!r}")
+        # exit
         return node
 
-    # ------------------------------------------------------------------
-    # Grammar rules
-    # ------------------------------------------------------------------
-
     def _peek(self) -> _Token | None:
+        # return the token at the current position without consuming it, or None if at end
         if self._pos < len(self._tokens):
             return self._tokens[self._pos]
         return None
 
     def _consume(self, expected_type: str | None = None) -> _Token:
+        # raise if there are no more tokens to consume
         if self._pos >= len(self._tokens):
             raise ValueError("unexpected end of expression")
         tok = self._tokens[self._pos]
+        # raise if the current token type does not match the expected type
         if expected_type is not None and tok.type != expected_type:
             raise ValueError(f"expected {expected_type!r}, got {tok.value!r}")
         self._pos += 1
+        # exit
         return tok
 
     def _parse_additive(self) -> ExprNode:
+        # parse the left-hand side of a potential addition or subtraction
         node = self._parse_multiplicative()
+        # consume any + or - operators and fold the right-hand side into a BinaryOpNode
         while (tok := self._peek()) and tok.type in ("PLUS", "MINUS"):
             self._consume()
             right = self._parse_multiplicative()
             op = BinaryOp.ADD if tok.value == "+" else BinaryOp.SUB
             node = BinaryOpNode(node, op, right)
+        # exit
         return node
 
     def _parse_multiplicative(self) -> ExprNode:
+        # parse the left-hand side of a potential multiplication or division
         node = self._parse_unary()
+        # consume any * or / operators and fold the right-hand side into a BinaryOpNode
         while (tok := self._peek()) and tok.type in ("STAR", "SLASH"):
             self._consume()
             right = self._parse_unary()
             op = BinaryOp.MUL if tok.value == "*" else BinaryOp.DIV
             node = BinaryOpNode(node, op, right)
+        # exit
         return node
 
     def _parse_unary(self) -> ExprNode:
+        # handle unary minus by wrapping the operand in a UnaryOpNode
         if (tok := self._peek()) and tok.type == "MINUS":
             self._consume()
             operand = self._parse_power()
             return UnaryOpNode(UnaryOp.NEG, operand)
+        # exit
         return self._parse_power()
 
     def _parse_power(self) -> ExprNode:
+        # parse the base of a potential power expression
         base = self._parse_primary()
+        # if a ^ follows, parse the exponent right-associatively
         if (tok := self._peek()) and tok.type == "CARET":
             self._consume()
-            exp = self._parse_unary()  # right-associative
+            # right-associative: exponent is parsed at unary precedence
+            exp = self._parse_unary()
             return BinaryOpNode(base, BinaryOp.POW, exp)
+        # exit
         return base
 
     def _parse_primary(self) -> ExprNode:
+        # peek at the next token to determine what kind of primary to parse
         tok = self._peek()
+        # raise if the expression is empty or unexpectedly ends here
         if tok is None:
             raise ValueError("unexpected end of expression")
-
-        # Numeric literal
+        # numeric literal
         if tok.type == "NUMBER":
             self._consume()
             return NumberNode(float(tok.value))
-
-        # Identifier — either a function call or a bare variable reference
+        # identifier — either a function call or a bare variable reference
         if tok.type == "IDENT":
             self._consume()
             name = tok.value
             if self._peek() and self._peek().type == "LPAREN":
-                self._consume()  # consume '('
+                # consume '('
+                self._consume()
                 lower_name = name.lower()
+                # known math functions get their arguments parsed as sub-expressions
                 if lower_name in _MATH_FUNCTIONS:
                     args = self._parse_expr_arglist()
                     self._consume("RPAREN")
                     return FunctionCallNode(name, args)
-                else:
-                    raw_args = self._parse_raw_arglist()
-                    self._consume("RPAREN")
-                    args_str = ", ".join(raw_args)
-                    return VariableRefNode(f"{name}({args_str})")
+                # all other IDENT(...) forms are SPICE variable references
+                raw_args = self._parse_raw_arglist()
+                self._consume("RPAREN")
+                args_str = ", ".join(raw_args)
+                return VariableRefNode(f"{name}({args_str})")
             return VariableRefNode(name)
-
-        # Parenthesised sub-expression
+        # parenthesised sub-expression
         if tok.type == "LPAREN":
             self._consume()
             node = self._parse_additive()
             self._consume("RPAREN")
             return node
-
         raise ValueError(f"unexpected token {tok.value!r}")
-
-    # ------------------------------------------------------------------
-    # Argument list helpers
-    # ------------------------------------------------------------------
 
     def _parse_expr_arglist(self) -> list[ExprNode]:
         """Parse a comma-separated list of full sub-expressions."""
         args: list[ExprNode] = []
+        # parse the first argument if the list is non-empty
         if self._peek() and self._peek().type != "RPAREN":
             args.append(self._parse_additive())
+            # consume any additional comma-separated arguments
             while self._peek() and self._peek().type == "COMMA":
                 self._consume()
                 args.append(self._parse_additive())
+        # exit
         return args
 
     def _parse_raw_arglist(self) -> list[str]:
@@ -222,6 +202,7 @@ class ExpressionParser:
         """
         raw_args: list[str] = []
         current: list[str] = []
+        # collect tokens until the closing parenthesis
         while (tok := self._peek()) and tok.type != "RPAREN":
             if tok.type == "COMMA":
                 raw_args.append("".join(current).strip())
@@ -230,6 +211,8 @@ class ExpressionParser:
             else:
                 current.append(tok.value)
                 self._consume()
+        # flush any remaining tokens into the last argument
         if current:
             raw_args.append("".join(current).strip())
+        # exit
         return raw_args
