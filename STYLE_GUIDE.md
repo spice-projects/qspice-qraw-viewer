@@ -51,6 +51,12 @@ This document defines the code style preferences for this project.
 - Function calls are always written on a single line — no multiline call syntax (no trailing `(`, no argument continuation lines)
 
 
+## QML Formatting
+
+### Declarations
+- Signal and property declarations are always written on a single line — no multiline continuation
+
+
 ## Testing
 
 ### Framework

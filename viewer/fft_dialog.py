@@ -55,7 +55,8 @@ class FftDialog(QDialog):
         abscissa_values = abscissa.values
         df, f_nyquist = fft_frequency_range(abscissa_values)
         # expose data to QML via context properties
-        ctx_properties = {
+        # build the initial property values for the QML root object
+        self._ctx_properties = {
             "variableNames": [v.name for v in variables],
             "windowFunctions": [w.value for w in WindowFunction],
             "outputTypes": [o.value for o in FftOutput],
@@ -72,10 +73,6 @@ class FftDialog(QDialog):
         self._qml_view.statusChanged.connect(self._on_qml_ready)
         self._qml_view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
         self._qml_view.setColor(QColor(_BG))
-        # set context properties so QML can bind to them immediately on load
-        ctx = self._qml_view.rootContext()
-        for key, value in ctx_properties.items():
-            ctx.setContextProperty(key, value)
         self._qml_view.setSource(QUrl.fromLocalFile(str(_QML_FILE)))
         # embed QML view into dialog
         container = QWidget.createWindowContainer(self._qml_view, self)
@@ -88,8 +85,11 @@ class FftDialog(QDialog):
         # only proceed once QML has finished loading successfully
         if status != QQuickView.Status.Ready:
             return
-        # connect QML dialog signals to Python accept / reject
+        # set properties directly on the root object
         root = self._qml_view.rootObject()
+        for key, value in self._ctx_properties.items():
+            root.setProperty(key, value)
+        # connect QML dialog signals to Python accept / reject
         root.dialogAccepted.connect(self._on_dialog_accepted)
         root.dialogRejected.connect(self.reject)
 
