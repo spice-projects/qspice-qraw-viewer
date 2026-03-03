@@ -140,8 +140,12 @@ class Chart:
         _, y_top_ratio, _, y_bottom_ratio = self._zoom_window
         # update axis ranges based on collected min and max values for each variable type
         for y_axis, (y_min, y_max) in self._axis_ranges.items():
+            # min and max values
+            y_range = y_max - y_min
+            if y_range == 0:
+                y_range = abs(y_max) * 0.01 if y_max != 0 else 1.0
             # set y axis range
-            y_axis.setRange(y_min + y_top_ratio * (y_max - y_min), y_min + y_bottom_ratio * (y_max - y_min))
+            y_axis.setRange(y_min + y_top_ratio * y_range - 0.01 * y_range, y_min + y_bottom_ratio * y_range + 0.01 * y_range)
 
     def update_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
         # vertical changes flag
