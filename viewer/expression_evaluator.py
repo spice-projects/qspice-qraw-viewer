@@ -7,7 +7,6 @@ import numpy as np
 
 from .expression import Expression
 from .expression_node import BinaryOp, BinaryOpNode, ExprNode, FunctionCallNode, NumberNode, UnaryOp, UnaryOpNode, VariableRefNode
-from .variable import Variable
 
 # maps lower-cased function name to a callable that accepts an ndarray and
 # returns an ndarray; all functions must handle complex inputs gracefully
@@ -19,7 +18,7 @@ _FUNCTION_IMPLS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
     "log":   np.log10,
     "log10": np.log10,
     "ln":    np.log,
-    "db":    lambda x: 20.0 * np.log10(np.abs(x)),
+    "db": lambda x: 20.0 * np.log10(np.abs(x)),
     "real":  np.real,
     "imag":  np.imag,
     "angle": lambda x: np.angle(x, deg=True),
@@ -99,16 +98,16 @@ class ExpressionEvaluator:
         evaluator = ExpressionEvaluator()
 
         tree    = parser.parse("V(R1) / I(R1)")
-        context = {"V(R1)": var_vr1, "I(R1)": var_ir1}
+        context = {"V(R1)": expr_vr1, "I(R1)": expr_ir1}
         result  = evaluator.evaluate(tree, context, name="Z(R1)")
         # result.unit == "Ω"
     """
 
-    def evaluate(self, node: ExprNode, context: dict[str, Variable], name: str | None = None, source: str | None = None) -> Expression:
+    def evaluate(self, node: ExprNode, context: dict[str, Expression], name: str | None = None, source: str | None = None) -> Expression:
         """Evaluate *node* against *context* and return an :class:`~viewer.expression.Expression`.
 
         :param node:    Root AST node returned by :class:`~viewer.expression_parser.ExpressionParser`.
-        :param context: Mapping from variable name to :class:`~viewer.variable.Variable`.
+        :param context: Mapping from variable name to :class:`~viewer.expression.Expression`.
                         Lookup is case-insensitive.
         :param name:    Display name for the resulting ``Expression``.  Defaults to
                         a string reconstruction of the AST.
@@ -124,7 +123,7 @@ class ExpressionEvaluator:
         # exit
         return Expression(expr_name, data, unit, source=source if source is not None else expr_name)
 
-    def _eval(self, node: ExprNode, context: dict[str, Variable]) -> tuple[np.ndarray, str]:
+    def _eval(self, node: ExprNode, context: dict[str, Expression]) -> tuple[np.ndarray, str]:
         """Recursively evaluate *node*, returning ``(data_array, unit_string)``."""
         # number literal evaluates to a scalar array with empty unit
         if isinstance(node, NumberNode):
@@ -137,7 +136,7 @@ class ExpressionEvaluator:
                 const_value, const_unit = entry
                 return np.array(const_value), const_unit
             var = self._lookup(node.name, context)
-            return var.values, var.type.value.unit
+            return var.data, var.unit
         # function call: delegate to _eval_function
         if isinstance(node, FunctionCallNode):
             return self._eval_function(node, context)
@@ -156,7 +155,7 @@ class ExpressionEvaluator:
             raise ValueError(f"unsupported unary operator: {node.op}")
         raise ValueError(f"unknown AST node type: {type(node).__name__}")
 
-    def _eval_function(self, node: FunctionCallNode, context: dict[str, Variable]) -> tuple[np.ndarray, str]:
+    def _eval_function(self, node: FunctionCallNode, context: dict[str, Expression]) -> tuple[np.ndarray, str]:
         # look up the function implementation
         func = _FUNCTION_IMPLS.get(node.name.lower())
         # raise if the function is not supported
@@ -186,7 +185,7 @@ class ExpressionEvaluator:
         raise ValueError(f"unsupported binary operator: {op}")
 
     @staticmethod
-    def _lookup(name: str, context: dict[str, Variable]) -> Variable:
+    def _lookup(name: str, context: dict[str, Expression]) -> Expression:
         """Look up *name* in *context* with case-insensitive fallback."""
         # try an exact match first
         var = context.get(name)
