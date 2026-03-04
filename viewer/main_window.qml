@@ -124,7 +124,7 @@ Item {
                 labelsVisible: true
                 titleVisible: false
                 titleText: ""
-                alignment: Qt.AlignHCenter
+                alignment: Qt.AlignBottom
 
                 labelDelegate: Item {
 
