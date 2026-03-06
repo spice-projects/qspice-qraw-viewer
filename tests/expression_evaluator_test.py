@@ -415,3 +415,76 @@ class TestExpressionEvaluator(TestCase):
         np.testing.assert_array_almost_equal(result.data, [1e-3, 2e-3, 3e-3])
         # 1e-05 (dimensionless) × mho (S) → S; S × V → A
         self.assertEqual(result.unit, "A")
+
+    def test_evaluate_two_node_probe_differential(self):
+        # arrange — V(a, b) = V(a) - V(b) when both single-node probes are in context;
+        # models '.alias I(R) (Gmho*V(node_a,node_b))' from real QSPICE output
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        va = Expression("V(node_a)", np.asarray([5.0, 6.0, 7.0]), "V")
+        vb = Expression("V(node_b)", np.asarray([1.0, 2.0, 3.0]), "V")
+        context = {"V(node_a)": va, "V(node_b)": vb}
+        tree = parser.parse("V(node_a,node_b)")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — differential voltage
+        np.testing.assert_array_equal(result.data, [4.0, 4.0, 4.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_two_node_probe_ground_second_arg(self):
+        # arrange — V(a, 0) = V(a) - 0 = V(a); node 0 is SPICE ground (not a stored variable);
+        # models '.alias I(R323) (0.125mho*V(speaker,0))' from test.qraw
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vspk = Expression("V(speaker)", np.asarray([1.0, -1.0, 2.0]), "V")
+        # context only contains V(speaker) — V(0) is absent (SPICE ground is not stored)
+        context = {"V(speaker)": vspk}
+        tree = parser.parse("V(speaker,0)")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — ground subtraction leaves the signal unchanged
+        np.testing.assert_array_equal(result.data, [1.0, -1.0, 2.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_two_node_probe_ground_first_arg(self):
+        # arrange — V(0, b) = 0 - V(b) = -V(b); node 0 is SPICE ground (not a stored variable);
+        # models '.alias I(R_U1_R1•XU305) (G*V(0,u1_n08257•xu305))' from test.qraw
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vb = Expression("V(u1_node)", np.asarray([3.0, 6.0, 9.0]), "V")
+        context = {"V(u1_node)": vb}
+        tree = parser.parse("V(0,u1_node)")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — V(0, b) = -V(b)
+        np.testing.assert_array_equal(result.data, [-3.0, -6.0, -9.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_two_node_probe_bullet_node_names(self):
+        # arrange — node names containing U+2022 (QSPICE hierarchy separator);
+        # models '.alias I(R3•X1•XU) (0.5mho*V(net-a•xu,5•x1•xu))' from test.qraw
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        va = Expression("V(net-a\u2022xu)", np.asarray([10.0, 20.0]), "V")
+        vb = Expression("V(5\u2022x1\u2022xu)", np.asarray([2.0, 4.0]), "V")
+        context = {"V(net-a\u2022xu)": va, "V(5\u2022x1\u2022xu)": vb}
+        tree = parser.parse("V(net-a\u2022xu,5\u2022x1\u2022xu)")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — differential voltage across hierarchical nodes
+        np.testing.assert_array_equal(result.data, [8.0, 16.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_alias_conductance_times_differential_voltage(self):
+        # arrange — full alias pattern from test.qraw: 'G*V(node,0)' where context has V(node)
+        # rather than V(node, 0); this is the real-world case the evaluator must handle
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vspk = Expression("V(speaker)", np.asarray([8.0, 16.0, 24.0]), "V")
+        context = {"V(speaker)": vspk}
+        tree = parser.parse("(0.125mho*V(speaker,0))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — 0.125 S × V(speaker) = current in amperes
+        np.testing.assert_array_almost_equal(result.data, [1.0, 2.0, 3.0])
+        self.assertEqual(result.unit, "A")

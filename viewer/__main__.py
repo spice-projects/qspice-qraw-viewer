@@ -5,7 +5,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from viewer.main_window import MainWindow
-from viewer.qraw_file2 import QRawFile
+from viewer.qraw_file import QRawFile
 
 logger = logging.getLogger(__name__)
 

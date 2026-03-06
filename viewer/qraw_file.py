@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 
 from .expression import Expression
+from .expression_parser import ExpressionParser
+from .expression_evaluator import ExpressionEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +61,13 @@ class PlotSuggestion:
         return self._expressions
 
 
-def _process_step(abscissa: Expression, num_points: int) -> tuple[int, int, Expression]:
+def _process_step(abscissa: Expression, num_points: int) -> tuple[int, Expression]:
     # calculate the period, O(n) at C speed
     period = np.argmax(np.isclose(abscissa.data[1:], abscissa.data[0], rtol=1e-6)) + 1
     # calculate the number of steps and points per step based on the period
     steps = num_points // period
     # number of steps and points per step
-    return steps, period, Expression(abscissa.name, abscissa.data[:period], abscissa.unit, abscissa.source)
+    return steps, Expression(abscissa.name, abscissa.data[:period], abscissa.unit, abscissa.source)
 
 
 def _process_scale(abscissa: Expression, scale: AbscissaScale) -> Expression:
@@ -228,7 +230,7 @@ class QRawFile:
             in_variables = False
             pos = 0
             # aliases
-
+            aliasses: dict[str, str] = {}
             # process file bytes
             while pos < len(data):
                 # find \n
@@ -274,6 +276,14 @@ class QRawFile:
                     key, _, value = line.partition(":")
                     # store in header dictionary
                     header[key.strip()] = value.strip()
+                # alias
+                if line.startswith(".alias"):
+                    # split line (space)
+                    parts = line.split()
+                    # should be three parts ".alias Name Expression"
+                    if len(parts) == 3:
+                        # append to aliasses
+                        aliasses[parts[1]] = parts[2]
             # validate that we found the binary section
             if binary_offset < 0:
                 # log error
@@ -307,11 +317,31 @@ class QRawFile:
                 matrix = flat.reshape(num_points, num_variables)
                 # extract variables
                 variables = [Expression(name, matrix[:, idx], var_type.value.unit, source=None) for idx, name, var_type in variable_definitions]
+            # process aliasses
+            if len(aliasses) > 0:
+                # create expression parser & evaluator
+                parser = ExpressionParser()
+                evaluator = ExpressionEvaluator()
+                # evaluator context
+                context: dict[str, Expression] = {var.name: var for var in variables}
+                # loop aliasses
+                for alias_name, alias_expression in aliasses.items():
+                    try:
+                        # parse expression
+                        parsed = parser.parse(alias_expression)
+                        # evaluate expression using the variables we have so far; this allows aliasses to reference previously-defined aliasses as long as there are no circular references
+                        expression = evaluator.evaluate(parsed, context, name=alias_name, source=alias_expression)
+                        # append new expression to file variables
+                        variables.append(expression)
+                        # update context, current expression could be used in another alias expression
+                        context[alias_name] = expression
+                    except Exception as ex:
+                        # log error but continue processing other aliasses
+                        logger.error("Failed to parse or evaluate alias '%s': %s", alias_name, ex)
             # step information
-            steps, step_length, variables[0] = _process_step(variables[0], num_points) if stepped else (1, num_points, variables[0])
+            steps, variables[0] = _process_step(variables[0], num_points) if stepped else (1, variables[0])
             # process scale (x axis)
             variables[0] = _process_scale(variables[0], abscissa_scale)
-
             # create QRawFile instance with parsed header, variables, and binary data; pass the mmap so it stays alive for the lifetime of the QRawFile — Variable arrays are views into it
             return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, steps=steps, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), expressions=variables, _mmap=data)
         finally:

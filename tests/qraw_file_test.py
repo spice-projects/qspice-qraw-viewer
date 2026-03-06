@@ -42,10 +42,13 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.plotname, "AC Analysis")
         self.assertTrue(qraw.complex)
         self.assertEqual(qraw.steps, 2)
-        self.assertEqual(len(qraw.expressions), 32)
+        # 32 raw variables + 2 aliases: Freq and Omega
+        self.assertEqual(len(qraw.expressions), 34)
         self.assertEqual(qraw.expressions[0].name, "Frequency")
         self.assertEqual(qraw.expressions[0].unit, "Hz")
         self.assertEqual(qraw.expressions[31].name, "X")
+        self.assertEqual(qraw.expressions[32].name, "Freq")
+        self.assertEqual(qraw.expressions[33].name, "Omega")
         self.assertEqual(qraw.expressions[31].unit, "")
         # assert abscissa range and scale
         self.assertEqual(qraw.abscissa_scale, AbscissaScale.DECADE)
@@ -64,13 +67,16 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.plotname, "AC Analysis")
         self.assertTrue(qraw.complex)
         self.assertEqual(qraw.steps, 1)
-        self.assertEqual(len(qraw.expressions), 24)
+        # 24 raw variables + 5 alias resistor currents + 2 aliases Freq/Omega
+        self.assertEqual(len(qraw.expressions), 31)
         self.assertEqual(qraw.expressions[0].name, "Frequency")
         self.assertEqual(qraw.expressions[0].unit, "Hz")
         self.assertEqual(qraw.expressions[1].name, "V(vout)")
         self.assertEqual(qraw.expressions[1].unit, "V")
         self.assertEqual(qraw.expressions[23].name, "I(COUT)")
         self.assertEqual(qraw.expressions[23].unit, "A")
+        self.assertEqual(qraw.expressions[29].name, "Freq")
+        self.assertEqual(qraw.expressions[30].name, "Omega")
         # assert abscissa range and scale
         self.assertEqual(qraw.abscissa_scale, AbscissaScale.DECADE)
         # assert default variables
@@ -88,8 +94,8 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.plotname, "Transient Analysis")
         self.assertFalse(qraw.complex)
         self.assertEqual(qraw.steps, 1)
-        self.assertEqual(len(qraw.expressions), 47)
-        self.assertEqual(len(qraw.expressions), 47)
+        # 47 raw variables + 7 alias resistor/conductance currents
+        self.assertEqual(len(qraw.expressions), 54)
         self.assertEqual(qraw.expressions[0].name, "Time")
         self.assertEqual(qraw.expressions[0].unit, "s")
         self.assertEqual(qraw.expressions[1].name, "V(out)")
@@ -117,11 +123,13 @@ class TestQRawFile(TestCase):
         self.assertEqual(qraw.plotname, "AC Analysis")
         self.assertTrue(qraw.complex)
         self.assertEqual(qraw.steps, 1)
-        self.assertEqual(len(qraw.expressions), 2)
-        self.assertEqual(len(qraw.expressions), 2)
+        # 2 raw variables + 2 aliases: Freq and Omega
+        self.assertEqual(len(qraw.expressions), 4)
         self.assertEqual(qraw.expressions[0].name, "Frequency")
         self.assertEqual(qraw.expressions[0].unit, "Hz")
         self.assertEqual(qraw.expressions[1].name, "OpenLoopGain")
+        self.assertEqual(qraw.expressions[2].name, "Freq")
+        self.assertEqual(qraw.expressions[3].name, "Omega")
         self.assertEqual(qraw.expressions[1].unit, "V")
         # assert abscissa range and scale
         self.assertEqual(qraw.abscissa_scale, AbscissaScale.OCTAVE)
