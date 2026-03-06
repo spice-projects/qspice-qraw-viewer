@@ -252,24 +252,37 @@ Item {
             }
 
             function applyUnit(unit, text, value) {
-                // absolute value for unit formatting
-                var absValue = Math.abs(value)
+                // absolute value for prefix selection
+                const absValue = Math.abs(value)
+                // giga
                 if (absValue >= 1e9)
-                    return (value / 1e9).toPrecision(3) + " G" + unit
+                    return (value / 1e9).toFixed(2) + " G" + unit
+                // mega
                 if (absValue >= 1e6)
-                    return (value / 1e6).toPrecision(3) + " M" + unit
+                    return (value / 1e6).toFixed(2) + " M" + unit
+                // kilo
                 if (absValue >= 1e3)
-                    return (value / 1e3).toPrecision(3) + " k" + unit
+                    return (value / 1e3).toFixed(2) + " k" + unit
+                // base unit
+                if (absValue >= 1.0)
+                    return value.toFixed(2) + " " + unit
+                // zero
+                if (absValue < 1e-15)
+                    return "0 " + unit
+                // femto
+                if (absValue < 1e-12)
+                    return (value * 1e15).toFixed(2) + " f" + unit
+                // pico
                 if (absValue < 1e-9)
-                    return (value * 1e12).toPrecision(3) + " p" + unit
+                    return (value * 1e12).toFixed(2) + " p" + unit
+                // nano
                 if (absValue < 1e-6)
-                    return (value * 1e9).toPrecision(3) + " n" + unit
+                    return (value * 1e9).toFixed(2) + " n" + unit
+                // micro
                 if (absValue < 1e-3)
-                    return (value * 1e6).toPrecision(3) + " µ" + unit
-                if (absValue < 0.09)
-                    return (value * 1e3).toPrecision(3) + " m" + unit
-                // format the value with an appropriate unit
-                return text + unit
+                    return (value * 1e6).toFixed(2) + " µ" + unit
+                // milli
+                return (value * 1e3).toFixed(2) + " m" + unit
             }
 
             function linearValueFormatter(unit, text) {

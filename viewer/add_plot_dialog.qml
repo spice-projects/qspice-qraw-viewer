@@ -6,15 +6,15 @@ Item {
     id: root
     anchors.fill: parent
 
-    property var variables: []
+    property var expressions: []
     property var selectedIndices: []
 
     signal dialogAccepted()
     signal dialogRejected()
     signal selectionChanged(string expression, bool selected)
 
-    function initialize(variables) {
-        root.variables = variables
+    function initialize(expressions) {
+        root.expressions = expressions
     }
 
     Rectangle {
@@ -25,7 +25,7 @@ Item {
     Text {
         id: titleLabel
         anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 12; leftMargin: 14 }
-        text: "Select one or more variables to plot:"
+        text: "Select one or more expressions to plot:"
         color: "#b0b8c8"
         font.pixelSize: 13
     }
@@ -42,7 +42,7 @@ Item {
         cellHeight: 28
         clip: true
 
-        model: root.variables
+        model: root.expressions
 
         delegate: Item {
 
@@ -79,7 +79,7 @@ Item {
                     onClicked: {
                         // toggle selection state
                         cellItem.selected = !cellItem.selected
-                        // emit signal to notify of selection change, passing the variable name and new selection state
+                        // emit signal to notify of selection change, passing the expression name and new selection state
                         root.selectionChanged(cellItem.expression, cellItem.selected)
                     }
                 }

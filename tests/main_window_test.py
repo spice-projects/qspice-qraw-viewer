@@ -22,10 +22,8 @@ class TestMainWindow(TestCase):
 
     def test_zoom_in_reduces_window(self):
         # arrange
-        qraw = MagicMock()
-        qraw.variables = [MagicMock(values=list(range(20)))]
         win = MainWindow.__new__(MainWindow)
-        win.qraw_file = qraw
+        win._abscissa = MagicMock(data=list(range(20)))
         win._charts = []
         win._abscissa_from_index = 0
         win._abscissa_to_index = 20
@@ -39,10 +37,8 @@ class TestMainWindow(TestCase):
 
     def test_zoom_out_moves_window_outward(self):
         # arrange
-        qraw = MagicMock()
-        qraw.variables = [MagicMock(values=list(range(20)))]
         win = MainWindow.__new__(MainWindow)
-        win.qraw_file = qraw
+        win._abscissa = MagicMock(data=list(range(20)))
         win._charts = []
         win._abscissa_from_index = 5
         win._abscissa_to_index = 15
@@ -57,10 +53,8 @@ class TestMainWindow(TestCase):
 
     def test_zoom_out_at_boundary_saturates(self):
         # arrange
-        qraw = MagicMock()
-        qraw.variables = [MagicMock(values=list(range(20)))]
         win = MainWindow.__new__(MainWindow)
-        win.qraw_file = qraw
+        win._abscissa = MagicMock(data=list(range(20)))
         win._charts = []
         win._abscissa_from_index = 0
         win._abscissa_to_index = 20
@@ -73,10 +67,8 @@ class TestMainWindow(TestCase):
 
     def test_minimum_window_enforced(self):
         # arrange
-        qraw = MagicMock()
-        qraw.variables = [MagicMock(values=list(range(20)))]
         win = MainWindow.__new__(MainWindow)
-        win.qraw_file = qraw
+        win._abscissa = MagicMock(data=list(range(20)))
         win._charts = []
         win._abscissa_from_index = 0
         win._abscissa_to_index = 20
@@ -89,10 +81,8 @@ class TestMainWindow(TestCase):
 
     def test_pan_moves_window_right(self):
         # arrange
-        qraw = MagicMock()
-        qraw.variables = [MagicMock(values=list(range(20)))]
         win = MainWindow.__new__(MainWindow)
-        win.qraw_file = qraw
+        win._abscissa = MagicMock(data=list(range(20)))
         win._charts = []
         win._abscissa_from_index = 5
         win._abscissa_to_index = 15
@@ -104,10 +94,8 @@ class TestMainWindow(TestCase):
 
     def test_pan_moves_window_left(self):
         # arrange
-        qraw = MagicMock()
-        qraw.variables = [MagicMock(values=list(range(20)))]
         win = MainWindow.__new__(MainWindow)
-        win.qraw_file = qraw
+        win._abscissa = MagicMock(data=list(range(20)))
         win._charts = []
         win._abscissa_from_index = 5
         win._abscissa_to_index = 15
@@ -119,10 +107,8 @@ class TestMainWindow(TestCase):
 
     def test_pan_clamps_at_left_boundary(self):
         # arrange
-        qraw = MagicMock()
-        qraw.variables = [MagicMock(values=list(range(20)))]
         win = MainWindow.__new__(MainWindow)
-        win.qraw_file = qraw
+        win._abscissa = MagicMock(data=list(range(20)))
         win._charts = []
         win._abscissa_from_index = 0
         win._abscissa_to_index = 10
@@ -134,10 +120,8 @@ class TestMainWindow(TestCase):
 
     def test_pan_clamps_at_right_boundary(self):
         # arrange
-        qraw = MagicMock()
-        qraw.variables = [MagicMock(values=list(range(20)))]
         win = MainWindow.__new__(MainWindow)
-        win.qraw_file = qraw
+        win._abscissa = MagicMock(data=list(range(20)))
         win._charts = []
         win._abscissa_from_index = 10
         win._abscissa_to_index = 20
@@ -175,12 +159,8 @@ class TestFormatValue(TestCase):
         self.assertEqual(_format_value(1e-10, "F"), "100.00 pF")
 
     def test_negative_value_giga(self):
-        result = _format_value(-3e9, "Hz")
-        self.assertIn("G", result)
-        self.assertIn("-", result)
+        self.assertEqual(_format_value(-3e9, "Hz"), "-3.00 GHz")
 
     def test_zero_value(self):
-        # zero has abs(0) < 1e-9 so it falls into the pico bucket
-        result = _format_value(0.0, "V")
-        self.assertIn("p", result)
-        self.assertIn("V", result)
+        # zero has abs(0) < 1e-12 so it returns "0 {unit}"
+        self.assertEqual(_format_value(0.0, "V"), "0 V")
