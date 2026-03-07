@@ -7,6 +7,7 @@ from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
 from .expression import Expression
+from .expression_manager import ExpressionManager
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +17,10 @@ _BG = "#1a1b1e"
 
 class AddPlotDialog(QDialog):
 
-    def __init__(self, expressions: list[Expression], selected_expressions: list[Expression], parent=None):
+    def __init__(self, expressions_manager: ExpressionManager, selected_expressions: list[Expression], parent=None):
         super().__init__(parent)
         # store expressions for index mapping when reading back the selection
-        self._expressions = expressions
+        self._expressions_manager = expressions_manager
         self._selected_expressions: set[Expression] = set(selected_expressions)
         # window setup
         self.setWindowTitle("Add Plot")
@@ -49,14 +50,14 @@ class AddPlotDialog(QDialog):
         root.dialogRejected.connect(self.reject)
         root.selectionChanged.connect(self._on_selection_changed)
         # initialize view
-        root.initialize([[v.name, v in self._selected_expressions] for v in self._expressions])
+        root.initialize([[v.name, v in self._selected_expressions] for v in self._expressions_manager.expressions])
 
     @Slot(str, bool)
     def _on_selection_changed(self, expression: str, selected: bool):
         # log information
         logger.debug("User %s expression: %s", "selected" if selected else "deselected", expression)
         # handle selection change from QML — update the selected expression list
-        expression = next((v for v in self._expressions if v.name == expression), None)
+        expression = next((v for v in self._expressions_manager.expressions if v.name == expression), None)
         # toggle expression in selected list based on selection state
         if expression is not None:
             # if selected, add to selected expressions if not already there; if deselected, remove from selected expressions if present

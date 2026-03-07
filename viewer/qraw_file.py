@@ -8,8 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from .expression import Expression
-from .expression_parser import ExpressionParser
-from .expression_evaluator import ExpressionEvaluator
+from .expression_manager import ExpressionManager
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +89,7 @@ _MODE_TO_CHART: dict[str, str] = {
 }
 
 
-def _chart_type_for_file(expressions: list[Expression]) -> str:
-    # expressions list must not be empty
-    if not expressions:
-        return "TRANSIENT"
-    # abscissa
-    abscissa = expressions[0]
+def _chart_type_for_file(abscissa: Expression) -> str:
     # type unambiguously determines the chart layout
     if abscissa.unit == "Hz":
         return "AC"
@@ -107,7 +101,7 @@ def _chart_type_for_file(expressions: list[Expression]) -> str:
 
 class QRawFile:
 
-    def __init__(self, filename: Path, title: str, date: str, plotname: str, complex: bool, steps: int, abscissa_scale: AbscissaScale, command: str, plot_suggestion: str, expressions: list[Expression], _mmap: mmap.mmap | None = None):
+    def __init__(self, filename: Path, title: str, date: str, plotname: str, complex: bool, steps: int, abscissa: Expression, abscissa_scale: AbscissaScale, command: str, plot_suggestion: str, expression_manager: ExpressionManager, _mmap: mmap.mmap | None = None):
         # fields
         self._filename = filename
         self._title = title
@@ -115,14 +109,15 @@ class QRawFile:
         self._plotname = plotname
         self._complex = complex
         self._steps = steps
+        self._abscissa = abscissa
         self._abscissa_scale = abscissa_scale
         self._command = command
         self._plot_suggestion = plot_suggestion
-        self._expressions = expressions
+        self._expression_manager = expression_manager
         # keep the mmap alive for as long as this object exists — Variable._values arrays are zero-copy views into the mmap buffer; closing the mmap would invalidate all of them
         self._mmap = _mmap
         # calculated
-        self._abscissa_points = len(expressions[0].values) if expressions else 0
+        self._abscissa_points = len(abscissa.data)
         self._plot_suggestions: list[PlotSuggestion] | None = None
 
     @property
@@ -150,6 +145,10 @@ class QRawFile:
         return self._steps
 
     @property
+    def abscissa(self) -> Expression:
+        return self._abscissa
+
+    @property
     def abscissa_scale(self) -> AbscissaScale:
         return self._abscissa_scale
 
@@ -158,8 +157,8 @@ class QRawFile:
         return self._command
 
     @property
-    def expressions(self) -> list[Expression]:
-        return self._expressions
+    def expression_manager(self) -> ExpressionManager:
+        return self._expression_manager
 
     def get_plot_suggestions(self) -> list[PlotSuggestion]:
         # empty or whitespace-only suggestions string means no suggestions
@@ -167,10 +166,8 @@ class QRawFile:
             return []
         # calculate plot suggestions
         if self._plot_suggestions is None:
-            # case-insensitive lookup from lowercased variable name to variable object
-            by_name = {v.name.lower(): v for v in self.expressions[1:]}
             # file chart type
-            file_chart_type = _chart_type_for_file(self.expressions)
+            file_chart_type = _chart_type_for_file(self._abscissa)
             # plot suggestions
             self._plot_suggestions = []
             # extract each «...» group in order, ``\xab``/``\xbb`` are the «» characters; using a raw string avoids accidental escaping.
@@ -191,8 +188,8 @@ class QRawFile:
                 seen: set[Expression] = set()
                 # loop tokens
                 for token in tokens:
-                    # case-insensitive match token to a variable name in the file (excluding the abscissa at index 0)
-                    expression = by_name.get(token.lower())
+                    # evaluate expression
+                    expression = self._expression_manager.evaluate(token)
                     # skip unmatched or already-added variables for this chart type
                     if expression is None or expression in seen:
                         continue
@@ -317,33 +314,24 @@ class QRawFile:
                 matrix = flat.reshape(num_points, num_variables)
                 # extract variables
                 variables = [Expression(name, matrix[:, idx], var_type.value.unit, source=None) for idx, name, var_type in variable_definitions]
+            # create expression manager
+            expression_manager = ExpressionManager(variables)
             # process aliasses
             if len(aliasses) > 0:
-                # create expression parser & evaluator
-                parser = ExpressionParser()
-                evaluator = ExpressionEvaluator()
-                # evaluator context
-                context: dict[str, Expression] = {var.name: var for var in variables}
                 # loop aliasses
                 for alias_name, alias_expression in aliasses.items():
                     try:
-                        # parse expression
-                        parsed = parser.parse(alias_expression)
                         # evaluate expression using the variables we have so far; this allows aliasses to reference previously-defined aliasses as long as there are no circular references
-                        expression = evaluator.evaluate(parsed, context, name=alias_name, source=alias_expression)
-                        # append new expression to file variables
-                        variables.append(expression)
-                        # update context, current expression could be used in another alias expression
-                        context[alias_name] = expression
+                        expression_manager.evaluate(alias_expression)
                     except Exception as ex:
                         # log error but continue processing other aliasses
-                        logger.error("Failed to parse or evaluate alias '%s': %s", alias_name, ex)
+                        logger.error("Failed to evaluate expression '%s': %s", alias_name, ex)
             # step information
-            steps, variables[0] = _process_step(variables[0], num_points) if stepped else (1, variables[0])
+            steps, abscissa = _process_step(variables[0], num_points) if stepped else (1, variables[0])
             # process scale (x axis)
-            variables[0] = _process_scale(variables[0], abscissa_scale)
+            abscissa = _process_scale(abscissa, abscissa_scale)
             # create QRawFile instance with parsed header, variables, and binary data; pass the mmap so it stays alive for the lifetime of the QRawFile — Variable arrays are views into it
-            return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, steps=steps, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), expressions=variables, _mmap=data)
+            return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, steps=steps, abscissa=abscissa, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), expression_manager=expression_manager, _mmap=data)
         finally:
             # log information
             logger.info("Finished loading QRAW file: %s, latency: %f seconds", path, time.perf_counter() - start_time)

@@ -7,6 +7,7 @@ from PySide6.QtQuick import QQuickItem
 
 from .decimation_algorithm import DecimationAlgorithm, decimate_xy
 from .expression import Expression
+from .expression_manager import ExpressionManager
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +17,11 @@ _DECIMATION_ALGORITHM = DecimationAlgorithm.M4
 
 class Chart:
 
-    def __init__(self, component: QQuickItem, abscissa: Expression, abscissa_from_index: int, abscissa_to_index: int, steps: int, decimate_target: int):
+    def __init__(self, component: QQuickItem, expression_manager: ExpressionManager, abscissa: Expression, abscissa_from_index: int, abscissa_to_index: int, steps: int, decimate_target: int):
         # store component
         self._component = component
+        # store expression manager
+        self._expression_manager = expression_manager
         # store variables
         self._abscissa = abscissa
         self._expressions: list[Expression] = []
@@ -90,7 +93,7 @@ class Chart:
             # ordinate series
             ordinate_series: list[tuple[Expression, QAbstractAxis, list[QLineSeries], float, float]] = []
             # check ordinate represents a complex number, if this is the case split measurement into magnitude and phase
-            for ordinate_variant in [ordinate.magnitude, ordinate.phase] if ordinate.complex else [ordinate]:
+            for ordinate_variant in self._get_expressions_to_plot(ordinate):
                 # find y axis for measurement type
                 y_axis = self._get_y_axis(ordinate_variant.unit)
                 if y_axis is None:
@@ -251,6 +254,21 @@ class Chart:
                 result.append((ordinate_variant.name, ordinate_variant.unit, values))
         # exit
         return result
+
+    def _get_expressions_to_plot(self, expression: Expression) -> list[Expression]:
+        # check we can plot expression as is
+        if not expression.complex:
+            return [expression]
+        # magniture
+        magnitude_expression = self._expression_manager.evaluate(f"abs({expression.name})")
+        if not magnitude_expression:
+            return []
+        # phase
+        phase_expression = self._expression_manager.evaluate(f"angle({expression.name})")
+        if not phase_expression:
+            return []
+        # exit
+        return [magnitude_expression, phase_expression]
 
     def _get_y_axis(self, unit: str) -> QAbstractAxis | None:
         # existing axis for measurement type

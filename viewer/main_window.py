@@ -61,6 +61,7 @@ def _format_value(value: float, unit: str) -> str:
     # milli
     return f"{value * 1e3:.2f} m{unit}"
 
+
 def _format_values(name: str, values: list[float], unit: str) -> str:
     # check a single value is available
     if len(values) == 1:
@@ -70,12 +71,17 @@ def _format_values(name: str, values: list[float], unit: str) -> str:
     # exit
     return f"{name} = [{formatted_values}]"
 
+
 class MainWindow(QMainWindow):
 
     def __init__(self, qraw_file: QRawFile):
         super().__init__()
-        # store file data for later use in the UI
-        self.qraw_file = qraw_file
+        # extract information from file
+        self._abscissa = qraw_file.abscissa
+        self._abscissa_scale = qraw_file.abscissa_scale
+        self._expression_manager = qraw_file.expression_manager
+        self._steps = qraw_file.steps
+        self._plot_suggestions = qraw_file.get_plot_suggestions()
         # set window title to include the loaded filename
         self.setWindowTitle(f"QSPICE - {qraw_file.filename.name}")
         # apply dark background stylesheet to the window chrome
@@ -84,8 +90,6 @@ class MainWindow(QMainWindow):
         self._charts: list[Chart] = []
         # keep FFT result windows alive to prevent garbage collection
         self._fft_windows: list[MainWindow] = []
-        # abscissa
-        self._abscissa = qraw_file.expressions[0]
         # default horizontal zoom
         self._abscissa_from_index = 0
         self._abscissa_to_index = len(self._abscissa.data)
@@ -179,16 +183,14 @@ class MainWindow(QMainWindow):
             return
 
     def _populate_charts(self):
-        # this is a calculated field, do it once per file and cache it
-        plot_suggestions = self.qraw_file.get_plot_suggestions()
         # fall back to one empty chart when there are none
-        if not plot_suggestions:
+        if not self._plot_suggestions:
             # add a single chart with the default type for this file, but no series (empty)
             self._add_chart([])
             # exit
             return
         # loop suggestions — each suggestion carries its own chart type
-        for suggestion in plot_suggestions:
+        for suggestion in self._plot_suggestions:
             # append chart using the type encoded in the suggestion
             self._add_chart(suggestion.expressions)
 
@@ -200,11 +202,11 @@ class MainWindow(QMainWindow):
         # get a reference to the chart's QML object so we can manipulate it
         chart_root = self._root.getChart(chart_index)
         # create chart instance
-        chart = Chart(chart_root, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self.qraw_file.steps, self._decimate_target)
+        chart = Chart(chart_root, self._expression_manager, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self._steps, self._decimate_target)
         # add it to the list of charts so we can keep track of it
         self._charts.append(chart)
         # render chart
-        chart.render("", self.qraw_file.abscissa_scale.value, set(expressions))
+        chart.render("", self._abscissa_scale.value, set(expressions))
 
     @Slot(int, float, float, float)
     def _on_horizontal_zoom(self, chart_index: int, x_left_ratio: float, x_right_ratio: float, zoom_factor: float):
@@ -307,7 +309,7 @@ class MainWindow(QMainWindow):
         # find chart at index
         chart = self._charts[chart_index]
         # open the add plot dialog
-        dialog = AddPlotDialog(self.qraw_file.expressions, chart.expressions, self)
+        dialog = AddPlotDialog(self._expression_manager, chart.expressions, self)
         # exit if the user cancelled
         if dialog.exec() != AddPlotDialog.DialogCode.Accepted:
             return
@@ -421,9 +423,9 @@ class MainWindow(QMainWindow):
         # retrieve the stored abscissa value (may be in log space for decade/octave scales)
         x_stored = float(self._abscissa.values[idx])
         # convert stored value back to physical abscissa value
-        if self.qraw_file.abscissa_scale == AbscissaScale.DECADE:
+        if self._abscissa_scale == AbscissaScale.DECADE:
             x_actual = 10 ** x_stored
-        elif self.qraw_file.abscissa_scale == AbscissaScale.OCTAVE:
+        elif self._abscissa_scale == AbscissaScale.OCTAVE:
             x_actual = 2 ** x_stored
         else:
             x_actual = x_stored
