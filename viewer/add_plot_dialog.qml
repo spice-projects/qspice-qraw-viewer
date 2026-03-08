@@ -10,6 +10,7 @@ Item {
     property var selectedIndices: []
     property var selectionState: ({})
     property string filterText: ""
+    property string expressionError: ""
 
     readonly property var filteredExpressions: {
         var text = filterText.toLowerCase()
@@ -22,6 +23,7 @@ Item {
     signal dialogAccepted()
     signal dialogRejected()
     signal selectionChanged(string expression, bool selected)
+    signal customExpressionRequested(string text)
 
     function initialize(expressions) {
         root.expressions = expressions
@@ -30,6 +32,28 @@ Item {
             state[expressions[i][0]] = expressions[i][1]
         }
         root.selectionState = state
+    }
+
+    function addExpression(name, selected) {
+        // update selection state for the new expression
+        var state = Object.assign({}, root.selectionState)
+        state[name] = selected
+        root.selectionState = state
+        // only append to expressions list if not already present
+        for (var i = 0; i < root.expressions.length; i++) {
+            if (String(root.expressions[i][0]) === name) {
+                exprInput.text = ""
+                return
+            }
+        }
+        var updated = root.expressions.slice()
+        updated.push([name, selected])
+        root.expressions = updated
+        exprInput.text = ""
+    }
+
+    function setExpressionError(msg) {
+        root.expressionError = msg
     }
 
     Rectangle {
@@ -102,7 +126,7 @@ Item {
         id: grid
         anchors {
             top: filterBar.bottom
-            left: parent.left; right: parent.right; bottom: buttonBar.top
+            left: parent.left; right: parent.right; bottom: customExprRow.top
             margins: 10
             topMargin: 8
         }
@@ -157,6 +181,93 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // custom expression input section
+    Rectangle {
+        id: customExprRow
+        anchors { bottom: buttonBar.top; left: parent.left; right: parent.right }
+        height: root.expressionError !== "" ? 72 : 50
+        color: "#16171e"
+
+        // top separator
+        Rectangle {
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: 1
+            color: "#3a3d4a"
+        }
+
+        // section label
+        Text {
+            id: customExprLabel
+            anchors { left: parent.left; verticalCenter: addExprBtn.verticalCenter; leftMargin: 12 }
+            text: "Expression:"
+            color: "#808898"
+            font.pixelSize: 12
+        }
+
+        // add button
+        Rectangle {
+            id: addExprBtn
+            anchors { right: parent.right; top: parent.top; topMargin: 11; rightMargin: 10 }
+            width: 52; height: 28
+            radius: 4
+            color: addExprMouse.containsMouse ? "#3a6aaa" : "#2a5090"
+            border.color: "#5b9bd5"
+            border.width: 1
+            Text {
+                anchors.centerIn: parent
+                text: "Add"
+                color: "#ffffff"
+                font.pixelSize: 12
+            }
+            MouseArea {
+                id: addExprMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.customExpressionRequested(exprInput.text.trim())
+            }
+        }
+
+        // expression text input
+        Rectangle {
+            id: exprInputRect
+            anchors { left: customExprLabel.right; right: addExprBtn.left; top: addExprBtn.top; leftMargin: 6; rightMargin: 6 }
+            height: 28
+            radius: 4
+            color: "#23252e"
+            border.color: exprInput.activeFocus ? "#5b9bd5" : (root.expressionError !== "" ? "#c05050" : "#3a3d4a")
+            border.width: 1
+
+            TextInput {
+                id: exprInput
+                anchors { verticalCenter: parent.verticalCenter; left: parent.left; right: parent.right; leftMargin: 8; rightMargin: 8 }
+                color: "#dce8f8"
+                font.pixelSize: 12
+                clip: true
+                onTextChanged: root.expressionError = ""
+                Keys.onReturnPressed: root.customExpressionRequested(exprInput.text.trim())
+                Keys.onEnterPressed: root.customExpressionRequested(exprInput.text.trim())
+
+                // placeholder text shown when empty
+                Text {
+                    anchors.fill: parent
+                    text: "e.g. V(net1) / I(R1)"
+                    color: "#555b6a"
+                    font.pixelSize: 12
+                    visible: exprInput.text === ""
+                }
+            }
+        }
+
+        // error label — only visible when expression evaluation fails
+        Text {
+            anchors { top: exprInputRect.bottom; left: exprInputRect.left; topMargin: 5 }
+            text: root.expressionError
+            color: "#c05050"
+            font.pixelSize: 11
+            visible: root.expressionError !== ""
         }
     }
 

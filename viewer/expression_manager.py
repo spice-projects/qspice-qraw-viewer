@@ -22,8 +22,10 @@ class ExpressionManager:
         return list(self._context.values())
 
     def evaluate(self, expression: str, name: str | None = None) -> Expression | None:
+        # context key
+        key = (name or expression).lower()
         # check expression has been evaluated before
-        result = self._context.get(expression, None)
+        result = self._context.get(key, None)
         if result is None:
             try:
                 # parse the expression string into an AST
@@ -31,7 +33,7 @@ class ExpressionManager:
                 # evaluate the AST using the provided context
                 result = self._evaluator.evaluate(ast, self._context, name, "expression manager")
                 # update context with the evaluated expression for future reference
-                self._context[name or expression] = result
+                self._context[key] = result
             except ValueError as e:
                 # log information
                 logger.warning("Failed to evaluate expression %r: %s", expression, e)

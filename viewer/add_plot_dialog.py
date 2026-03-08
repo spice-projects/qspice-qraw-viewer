@@ -25,7 +25,7 @@ class AddPlotDialog(QDialog):
         # window setup
         self.setWindowTitle("Add Plot")
         self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.resize(560, 420)
+        self.resize(560, 480)
         # create the QML view — inject expression names before loading so QML can bind to them immediately
         self._qml_view = QQuickView()
         self._qml_view.statusChanged.connect(self._on_qml_ready)
@@ -49,6 +49,7 @@ class AddPlotDialog(QDialog):
         root.dialogAccepted.connect(self.accept)
         root.dialogRejected.connect(self.reject)
         root.selectionChanged.connect(self._on_selection_changed)
+        root.customExpressionRequested.connect(self._on_custom_expression_requested)
         # initialize view
         root.initialize([[v.name, v in self._selected_expressions] for v in self._expressions_manager.expressions])
 
@@ -68,6 +69,23 @@ class AddPlotDialog(QDialog):
                 return
             # remove expression from selected set
             self._selected_expressions.remove(expression)
+
+    @Slot(str)
+    def _on_custom_expression_requested(self, text: str):
+        # ignore blank input
+        text = text.strip()
+        if not text:
+            return
+        # evaluate the expression through the manager; returns None on failure
+        expression = self._expressions_manager.evaluate(text, text)
+        root = self._qml_view.rootObject()
+        if expression is None:
+            root.setExpressionError("Invalid expression")
+            return
+        # add to selected set
+        self._selected_expressions.add(expression)
+        # update QML list and selection state; addExpression handles deduplication
+        root.addExpression(expression.name, True)
 
     @property
     def selected_expressions(self) -> set[Expression]:
