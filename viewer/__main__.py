@@ -36,18 +36,14 @@ def _warning_handler(message, category, filename, lineno, file=None, line=None) 
 
 
 def main():
-    # use Windows-style flag prefix on Windows, UNIX-style on all other platforms
-    is_windows = sys.platform == "win32"
-    prefix = "/" if is_windows else "--"
-    short_prefix = "/" if is_windows else "-"
-    # configure argument parser with platform-appropriate prefix character
-    parser = argparse.ArgumentParser(description="QSPICE QRAW Viewer", prefix_chars="/" if is_windows else "-")
+    # configure argument parser
+    parser = argparse.ArgumentParser(description="QSPICE QRAW Viewer")
     # input file is required (always)
     parser.add_argument("input", nargs="?", help="Input QRAW file")
     # headless mode, used to export data
-    parser.add_argument(f"{short_prefix}H", f"{prefix}headless", action="store_true", help="Parse and log the file without opening the viewer UI")
+    parser.add_argument("-H", "--headless", action="store_true", help="Parse and log the file without opening the viewer UI")
     # log level, defaults to WARNING
-    parser.add_argument(f"{prefix}log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], help="Set the logging level")
+    parser.add_argument("--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], help="Set the logging level")
     # parse command line arguments
     args = parser.parse_args()
     # configure logging with the requested level
