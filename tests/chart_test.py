@@ -13,6 +13,7 @@ sys.modules.setdefault("PySide6.QtQuick", MagicMock())
 from viewer.chart import Chart  # noqa: E402
 from viewer.expression import Expression  # noqa: E402
 
+
 class TestChart(TestCase):
 
     def test_init_zoom_window(self):

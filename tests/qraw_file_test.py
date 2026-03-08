@@ -663,4 +663,3 @@ class TestPlotSuggestion(TestCase):
         ps = PlotSuggestion("AC", [])
         # act / assert
         self.assertEqual(ps.expressions, [])
-

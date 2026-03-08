@@ -252,4 +252,3 @@ class TestExpressionManager(TestCase):
         manager.evaluate("2 * V(R1)")
         # assert
         self.assertEqual(len(manager.expressions), expected_len)
-

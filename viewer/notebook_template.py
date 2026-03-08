@@ -64,7 +64,7 @@ def _make_notebook(qraw_path: Path) -> dict:
                     "import sys\n",
                     "import numpy as np\n",
                     "import matplotlib.pyplot as plt\n",
-                    f"# ensure the live project source takes priority over any installed copy\n",
+                    "# ensure the live project source takes priority over any installed copy\n",
                     f"_project_root = {str(_PROJECT_ROOT)!r}\n",
                     "if _project_root not in sys.path:\n",
                     "    sys.path.insert(0, _project_root)\n",

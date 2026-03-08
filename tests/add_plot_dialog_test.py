@@ -139,7 +139,6 @@ class TestAddPlotDialogOnCustomExpressionRequested(TestCase):
     def test_valid_expression_added_to_selected(self):
         # arrange
         dialog, e1, _e2, _e3 = _make_dialog(selected=[])
-        root = dialog._qml_view.rootObject.return_value
         # act — "V(R1)" is a known expression in the manager
         dialog._on_custom_expression_requested("V(R1)")
         # assert — expression was resolved and added to the selected set
