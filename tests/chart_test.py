@@ -325,3 +325,14 @@ class TestChart(TestCase):
         names = {r[0] for r in result}
         self.assertIn("Vout", names)
         self.assertIn("Iout", names)
+
+    def test_abscissa_property(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 100, 1, 500)
+        # act
+        result = chart.abscissa
+        # assert
+        self.assertIs(result, abscissa)

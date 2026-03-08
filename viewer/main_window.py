@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
 from .expression import Expression
+from .expression_manager import ExpressionManager
 from .fft import FftOutput, compute_fft, is_uniform
 from .fft_dialog import FftDialog
 from .jupyter_window import JupyterWindow
@@ -385,16 +386,18 @@ class MainWindow(QMainWindow):
         if dialog.exec() != FftDialog.DialogCode.Accepted:
             return
         # retrieve user selections
-        expression = dialog.result_expression
+        expression = dialog.result_variable
         from_index = dialog.result_from_index
         to_index = dialog.result_to_index
         window = dialog.result_window
         zero_pad = dialog.result_zero_pad
         normalize = dialog.result_normalize
         output = dialog.result_output
-        # extract data slice for step 0 (first / only simulation step)
+        # number of samples per step (abscissa is already trimmed to one period)
+        step_points = len(self._abscissa.data)
+        # extract the step-0 data slice within the user-selected range
         x = self._abscissa.values[from_index:to_index]
-        y = expression.step_values(0)[from_index:to_index]
+        y = expression.values[0:step_points][from_index:to_index]
         try:
             # compute FFT using numpy
             frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output)
@@ -402,21 +405,23 @@ class MainWindow(QMainWindow):
             # log exception and abort when computation fails
             logger.exception("FFT computation failed for expression '%s'", expression.name)
             return
-        # determine expression type based on FFT output
-        fft_variable_type = VariableType.PHASE if output == FftOutput.PHASE else VariableType.VOLTAGE
+        # determine unit based on FFT output type
+        fft_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else "V")
         # guard against an unexpectedly empty result (compute_fft guarantees non-empty on success)
         if len(frequencies) == 0:
             # log error and abort
             logger.error("FFT computation returned empty result for expression '%s'", expression.name)
             return
-        # create frequency variable for the abscissa (index 0)
-        freq_variable = Variable(index=0, name="Frequency", type=VariableType.FREQUENCY, values=frequencies)
-        # name for the FFT result variable
-        fft_variable_name = f"FFT({expression.name})"
-        # create FFT result variable (index 1)
-        fft_variable = Variable(index=1, name=fft_variable_name, type=fft_variable_type, values=fft_values)
-        # create a synthetic QRawFile with frequency at index 0 and FFT values at index 1
-        fft_qraw = QRawFile(filename=Path(f"fft_{expression.name}.qraw"), title=f"FFT – {expression.name}", date="", plotname="FFT", complex=False, stepped=False, abscissa="", abscissa_min=float(frequencies[0]), abscissa_max=float(frequencies[-1]), abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=f"\xab{fft_variable_name}\xbb", num_points=len(frequencies), variables=[freq_variable, fft_variable])
+        # name for the FFT result expression
+        fft_expression_name = f"FFT({expression.name})"
+        # create frequency expression for the abscissa
+        freq_expression = Expression("Frequency", frequencies, "Hz")
+        # create FFT result expression
+        fft_expression = Expression(fft_expression_name, fft_values, fft_unit)
+        # build expression manager with both expressions so plot suggestions work
+        expression_manager = ExpressionManager([freq_expression, fft_expression])
+        # create a synthetic QRawFile with frequency abscissa and FFT values
+        fft_qraw = QRawFile(filename=Path(f"fft_{expression.name}.qraw"), title=f"FFT – {expression.name}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=f"\xab{fft_expression_name}\xbb", expression_manager=expression_manager)
         # create a new MainWindow to render the FFT result using the existing infrastructure
         fft_window = MainWindow(fft_qraw)
         # keep reference alive to prevent garbage collection

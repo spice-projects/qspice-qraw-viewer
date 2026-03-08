@@ -7,7 +7,10 @@ import numpy as np
 from viewer.expression import Expression
 from viewer.qraw_file import (
     AbscissaScale,
+    PlotSuggestion,
     QRawFile,
+    VariableType,
+    VariableTypeInformation,
     _chart_type_for_file,
     _process_scale,
     _process_step,
@@ -569,4 +572,95 @@ class TestChartTypeForFile(TestCase):
         result = _chart_type_for_file(abscissa)
         # assert
         self.assertEqual(result, "DC")
+
+
+class TestVariableTypeInformation(TestCase):
+
+    def test_name_voltage(self):
+        # arrange
+        vti = VariableTypeInformation("voltage", "V")
+        # act / assert
+        self.assertEqual(vti.name, "voltage")
+
+    def test_unit_voltage(self):
+        # arrange
+        vti = VariableTypeInformation("voltage", "V")
+        # act / assert
+        self.assertEqual(vti.unit, "V")
+
+    def test_name_frequency(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.FREQUENCY.value.name, "frequency")
+
+    def test_unit_frequency(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.FREQUENCY.value.unit, "Hz")
+
+    def test_name_current(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.CURRENT.value.name, "current")
+
+    def test_unit_current(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.CURRENT.value.unit, "A")
+
+    def test_name_time(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.TIME.value.name, "time")
+
+    def test_unit_time(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.TIME.value.unit, "s")
+
+    def test_name_phase(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.PHASE.value.name, "phase")
+
+    def test_unit_phase(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.PHASE.value.unit, "°")
+
+    def test_name_parameter(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.PARAMETER.value.name, "parameter")
+
+    def test_unit_parameter_is_empty(self):
+        # arrange / act / assert
+        self.assertEqual(VariableType.PARAMETER.value.unit, "")
+
+
+class TestPlotSuggestion(TestCase):
+
+    def test_chart_type_property(self):
+        # arrange
+        e = Expression("V(R1)", np.array([1.0]), "V")
+        ps = PlotSuggestion("AC", [e])
+        # act / assert
+        self.assertEqual(ps.chart_type, "AC")
+
+    def test_expressions_property(self):
+        # arrange
+        e1 = Expression("V(R1)", np.array([1.0]), "V")
+        e2 = Expression("I(R1)", np.array([0.1]), "A")
+        ps = PlotSuggestion("TRANSIENT", [e1, e2])
+        # act / assert
+        self.assertEqual(ps.expressions, [e1, e2])
+
+    def test_chart_type_transient(self):
+        # arrange
+        ps = PlotSuggestion("TRANSIENT", [])
+        # act / assert
+        self.assertEqual(ps.chart_type, "TRANSIENT")
+
+    def test_chart_type_dc(self):
+        # arrange
+        ps = PlotSuggestion("DC", [])
+        # act / assert
+        self.assertEqual(ps.chart_type, "DC")
+
+    def test_expressions_empty_list(self):
+        # arrange
+        ps = PlotSuggestion("AC", [])
+        # act / assert
+        self.assertEqual(ps.expressions, [])
 
