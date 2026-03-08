@@ -12,6 +12,7 @@ from .chart import Chart
 from .expression import Expression
 from .fft import FftOutput, compute_fft, is_uniform
 from .fft_dialog import FftDialog
+from .jupyter_window import JupyterWindow
 from .qraw_file import AbscissaScale, QRawFile
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,8 @@ class MainWindow(QMainWindow):
         self._expression_manager = qraw_file.expression_manager
         self._steps = qraw_file.steps
         self._plot_suggestions = qraw_file.get_plot_suggestions()
+        # store the simulation file path for use by the Jupyter integration
+        self._qraw_path = qraw_file.filename
         # set window title to include the loaded filename
         self.setWindowTitle(f"QSPICE - {qraw_file.filename.name}")
         # apply dark background stylesheet to the window chrome
@@ -88,6 +91,8 @@ class MainWindow(QMainWindow):
         self._charts: list[Chart] = []
         # keep FFT result windows alive to prevent garbage collection
         self._fft_windows: list[MainWindow] = []
+        # keep Jupyter windows alive to prevent garbage collection
+        self._jupyter_windows: list[JupyterWindow] = []
         # default horizontal zoom
         self._abscissa_from_index = 0
         self._abscissa_to_index = len(self._abscissa.data)
@@ -153,6 +158,13 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        # Tools menu
+        tools_menu = menu_bar.addMenu("&Tools")
+        # Tools | Open Jupyter
+        jupyter_action = QAction("Open Jupyter...", self)
+        jupyter_action.triggered.connect(self._on_open_jupyter)
+        tools_menu.addAction(jupyter_action)
+
         # Window menu
         window_menu = menu_bar.addMenu("&Window")
         # Window | Add Window
@@ -166,6 +178,17 @@ class MainWindow(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(lambda: None)
         help_menu.addAction(about_action)
+
+    @Slot()
+    def _on_open_jupyter(self) -> None:
+        # create a new Jupyter window for the currently loaded simulation file
+        window = JupyterWindow(self._qraw_path)
+        # keep a reference to prevent the window from being garbage collected
+        self._jupyter_windows.append(window)
+        # show a status bar message while the server starts; clear it when the window appears
+        self.statusBar().showMessage("Starting JupyterLab…")
+        window.ready.connect(lambda: self.statusBar().clearMessage())
+        # window.show() is intentionally absent — JupyterWindow shows itself when fully loaded
 
     def _on_file_open(self):
         # native file dialog to pick a QRAW file
