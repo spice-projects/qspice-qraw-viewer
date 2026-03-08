@@ -203,7 +203,7 @@ class QRawFile:
         return self._plot_suggestions
 
     @staticmethod
-    def load(filename: str | Path) -> "QRawFile" | None:
+    def load(filename: str | Path) -> "QRawFile | None":
         # load file
         path = Path(filename)
         if not path.exists():
