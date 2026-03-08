@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 class ExpressionManager:
 
     def __init__(self, expressions: list[Expression]):
-        # create expression context
-        self._context: dict[str, Expression] = {expression.name: expression for expression in expressions}
+        # create expression context; keys are lowercased so that evaluate() lookups always match
+        self._context: dict[str, Expression] = {expression.name.lower(): expression for expression in expressions}
         # initialize the parser and evaluator instances
         self._parser = ExpressionParser()
         self._evaluator = ExpressionEvaluator()
