@@ -7,8 +7,8 @@ from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
+from .expression import Expression
 from .fft import FftOutput, WindowFunction, ZeroPadding, fft_frequency_range
-from .variable import Variable
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +25,14 @@ class FftDialog(QDialog):
 
     Parameters
     ----------
-    variables        : ordinate variables available for FFT (abscissa excluded).
-    abscissa         : time-domain abscissa variable.
+    variables        : ordinate expressions available for FFT (abscissa excluded).
+    abscissa         : time-domain abscissa expression.
     zoom_from_index  : left edge of the current visible zoom window (sample index).
     zoom_to_index    : right edge of the current visible zoom window (sample index).
     parent           : optional parent widget.
     """
 
-    def __init__(self, variables: list[Variable], abscissa: Variable, zoom_from_index: int, zoom_to_index: int, parent=None):
+    def __init__(self, variables: list[Expression], abscissa: Expression, zoom_from_index: int, zoom_to_index: int, parent=None):
         super().__init__(parent)
         # store references
         self._variables = variables
@@ -40,7 +40,7 @@ class FftDialog(QDialog):
         self._zoom_from_index = zoom_from_index
         self._zoom_to_index = zoom_to_index
         # result fields populated when the dialog is accepted
-        self._result_variable: Variable | None = None
+        self._result_variable: Expression | None = None
         self._result_from_index: int = 0
         self._result_to_index: int = len(abscissa.values)
         self._result_window: WindowFunction = WindowFunction.RECTANGULAR
@@ -146,7 +146,7 @@ class FftDialog(QDialog):
         self.accept()
 
     @property
-    def result_variable(self) -> Variable | None:
+    def result_variable(self) -> Expression | None:
         return self._result_variable
 
     @property

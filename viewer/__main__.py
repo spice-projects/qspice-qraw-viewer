@@ -1,13 +1,38 @@
 import argparse
 import logging
 import sys
+import warnings
 
+from PySide6.QtCore import QtMsgType, qInstallMessageHandler
 from PySide6.QtWidgets import QApplication
 
 from viewer.main_window import MainWindow
 from viewer.qraw_file import QRawFile
 
 logger = logging.getLogger(__name__)
+
+_qml_logger = logging.getLogger("viewer.qml")
+_warnings_logger = logging.getLogger("viewer.warnings")
+
+_QT_LEVEL_MAP = {
+    QtMsgType.QtDebugMsg:    logging.DEBUG,
+    QtMsgType.QtInfoMsg:     logging.INFO,
+    QtMsgType.QtWarningMsg:  logging.WARNING,
+    QtMsgType.QtCriticalMsg: logging.ERROR,
+    QtMsgType.QtFatalMsg:    logging.CRITICAL,
+}
+
+
+def _qt_message_handler(msg_type: QtMsgType, _, message: str) -> None:
+    # translate level
+    level = _QT_LEVEL_MAP.get(msg_type, logging.WARNING)
+    # write message to the QML logger
+    _qml_logger.log(level, "%s", message)
+
+
+def _warning_handler(message, category, filename, lineno, file=None, line=None) -> None:
+    # write message to the warnings logger
+    _warnings_logger.warning("%s:%d: %s: %s", filename, lineno, category.__name__, message)
 
 
 def main():
@@ -27,6 +52,10 @@ def main():
     args = parser.parse_args()
     # configure logging with the requested level
     logging.basicConfig(level=getattr(logging, args.log_level), format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    # route all Qt/QML messages through Python logging
+    qInstallMessageHandler(_qt_message_handler)
+    # route all Python/numpy warnings through Python logging
+    warnings.showwarning = _warning_handler
     # validate required input argument
     if not args.input:
         # log information

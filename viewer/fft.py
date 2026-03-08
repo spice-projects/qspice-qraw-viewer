@@ -161,13 +161,18 @@ def compute_fft(x: np.ndarray, y: np.ndarray, window: WindowFunction = WindowFun
     spectrum = np.fft.rfft(y_windowed, n=n_fft)
     # frequency axis in Hz
     frequencies = np.fft.rfftfreq(n_fft, d=dt)
-    # amplitude correction: rfft returns one-sided, so multiply by 2/n
-    # (except the DC component at index 0)
-    scale = 2.0 / n
+    # amplitude correction: rfft returns one-sided, so multiply by 2/sum(win);
+    # sum(win) equals n for rectangular windows and is smaller for all others —
+    # dividing by sum(win) rather than n gives the correct coherent gain correction
+    scale = 2.0 / float(np.sum(win))
     if output == FftOutput.MAGNITUDE:
         values = np.abs(spectrum) * scale
         # halve the DC component which is not doubled in one-sided FFT
         values[0] /= 2.0
+        # halve the Nyquist bin for even-length FFTs — it is also real-valued and
+        # uniquely represented, so it must not be doubled (same reason as DC)
+        if n_fft % 2 == 0:
+            values[-1] /= 2.0
         # optionally scale so the peak equals 1
         if normalize:
             peak = float(np.max(values))
@@ -178,6 +183,9 @@ def compute_fft(x: np.ndarray, y: np.ndarray, window: WindowFunction = WindowFun
         magnitude = np.abs(spectrum) * scale
         # halve the DC component which is not doubled in one-sided FFT
         magnitude[0] /= 2.0
+        # halve the Nyquist bin for even-length FFTs (same reasoning as MAGNITUDE)
+        if n_fft % 2 == 0:
+            magnitude[-1] /= 2.0
         # optionally scale so the peak equals 1 before converting to dB
         if normalize:
             peak = float(np.max(magnitude))

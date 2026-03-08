@@ -304,3 +304,47 @@ class TestExpressionParser(TestCase):
         self.assertIsInstance(node.right, VariableRefNode)
         # parser normalizes argument spacing: V(in,n06) → "V(in, n06)" (comma + space)
         self.assertEqual(node.right.name, "V(in, n06)")
+
+    def test_parse_alias_bullet_hierarchy_separator_in_probe(self):
+        # arrange — QSPICE uses U+2022 (bullet •) as a hierarchy separator in node names,
+        # e.g. from '.alias I(R1•XU1) (1mho*V(a•b•c,0))' in test.qraw
+        parser = ExpressionParser()
+        # act
+        node = parser.parse("V(a\u2022b\u2022c)")
+        # assert
+        self.assertIsInstance(node, VariableRefNode)
+        self.assertEqual(node.name, "V(a\u2022b\u2022c)")
+
+    def test_parse_alias_hash_in_node_name(self):
+        # arrange — QSPICE uses '#' to denote special quantities like '#current',
+        # e.g. from '.alias I(D3•X1•XU302) (1mho*V(d3•x1•xu302#current))' in test.qraw
+        parser = ExpressionParser()
+        # act
+        node = parser.parse("V(d3\u2022x1\u2022xu302#current)")
+        # assert
+        self.assertIsInstance(node, VariableRefNode)
+        self.assertEqual(node.name, "V(d3\u2022x1\u2022xu302#current)")
+
+    def test_parse_alias_bullet_with_digit_start_node(self):
+        # arrange — from '.alias I(RS8•X1•XT301) (2.5mho*V(26a•x1•xt301,0))' in test.qraw;
+        # node names can start with a digit when decoded from cp1252
+        parser = ExpressionParser()
+        # act
+        node = parser.parse("(2.5mho*V(26a\u2022x1\u2022xt301,0))")
+        # assert — outer is multiplication, left is 2.5*mho, right is the probe
+        self.assertIsInstance(node, BinaryOpNode)
+        self.assertEqual(node.op, BinaryOp.MUL)
+        self.assertIsInstance(node.right, VariableRefNode)
+        # digit-starting tokens (NUMBER) and IDENT tokens are joined verbatim in raw arg context
+        self.assertEqual(node.right.name, "V(26a\u2022x1\u2022xt301, 0)")
+
+    def test_parse_alias_bullet_in_current_probe_arg(self):
+        # arrange — from '.alias I(F_F1•X_F1•XU305) (1*I(VF_F1•X_F1•XU305))' in test.qraw
+        parser = ExpressionParser()
+        # act
+        node = parser.parse("(1*I(VF_F1\u2022X_F1\u2022XU305))")
+        # assert — outer is multiplication, right is the current probe with bullet path
+        self.assertIsInstance(node, BinaryOpNode)
+        self.assertEqual(node.op, BinaryOp.MUL)
+        self.assertIsInstance(node.right, VariableRefNode)
+        self.assertEqual(node.right.name, "I(VF_F1\u2022X_F1\u2022XU305)")

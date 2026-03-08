@@ -17,7 +17,7 @@ class _Token(NamedTuple):
     value: str
 
 
-_TOKEN_RE = re.compile(r"(?P<NUMBER>\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)|(?P<IDENT>[A-Za-z_][A-Za-z0-9_\[\]]*)|(?P<LPAREN>\()|(?P<RPAREN>\))|(?P<COMMA>,)|(?P<PLUS>\+)|(?P<MINUS>-)|(?P<STAR>\*)|(?P<SLASH>/)|(?P<CARET>\^)|(?P<SPACE>\s+)")
+_TOKEN_RE = re.compile(r"(?P<NUMBER>\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)|(?P<IDENT>[A-Za-z_][A-Za-z0-9_\[\]]*)|(?P<LPAREN>\()|(?P<RPAREN>\))|(?P<COMMA>,)|(?P<PLUS>\+)|(?P<MINUS>-)|(?P<STAR>\*)|(?P<SLASH>/)|(?P<CARET>\^)|(?P<SPACE>\s+)|(?P<CHAR>.)")
 
 
 def _tokenize(text: str) -> list[_Token]:
@@ -25,9 +25,6 @@ def _tokenize(text: str) -> list[_Token]:
     pos = 0
     while pos < len(text):
         m = _TOKEN_RE.match(text, pos)
-        # raise if no token matched at the current position
-        if m is None:
-            raise ValueError(f"unexpected character {text[pos]!r} at position {pos}")
         pos = m.end()
         kind = m.lastgroup
         # skip whitespace tokens

@@ -6,15 +6,54 @@ Item {
     id: root
     anchors.fill: parent
 
-    property var variables: []
+    property var expressions: []
     property var selectedIndices: []
+    property var selectionState: ({})
+    property string filterText: ""
+    property string expressionError: ""
+
+    readonly property var filteredExpressions: {
+        var text = filterText.toLowerCase()
+        if (text === "") return root.expressions
+        return root.expressions.filter(function(e) {
+            return String(e[0]).toLowerCase().indexOf(text) !== -1
+        })
+    }
 
     signal dialogAccepted()
     signal dialogRejected()
     signal selectionChanged(string expression, bool selected)
+    signal customExpressionRequested(string text)
 
-    function initialize(variables) {
-        root.variables = variables
+    function initialize(expressions) {
+        root.expressions = expressions
+        var state = {}
+        for (var i = 0; i < expressions.length; i++) {
+            state[expressions[i][0]] = expressions[i][1]
+        }
+        root.selectionState = state
+    }
+
+    function addExpression(name, selected) {
+        // update selection state for the new expression
+        var state = Object.assign({}, root.selectionState)
+        state[name] = selected
+        root.selectionState = state
+        // only append to expressions list if not already present
+        for (var i = 0; i < root.expressions.length; i++) {
+            if (String(root.expressions[i][0]) === name) {
+                exprInput.text = ""
+                return
+            }
+        }
+        var updated = root.expressions.slice()
+        updated.push([name, selected])
+        root.expressions = updated
+        exprInput.text = ""
+    }
+
+    function setExpressionError(msg) {
+        root.expressionError = msg
     }
 
     Rectangle {
@@ -25,16 +64,69 @@ Item {
     Text {
         id: titleLabel
         anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 12; leftMargin: 14 }
-        text: "Select one or more variables to plot:"
+        text: "Select one or more expressions to plot:"
         color: "#b0b8c8"
         font.pixelSize: 13
+    }
+
+    // filter input bar
+    Rectangle {
+        id: filterBar
+        anchors { top: titleLabel.bottom; left: parent.left; right: parent.right; topMargin: 8; leftMargin: 10; rightMargin: 10 }
+        height: 28
+        radius: 4
+        color: "#23252e"
+        border.color: filterInput.activeFocus ? "#5b9bd5" : "#3a3d4a"
+        border.width: 1
+
+        TextInput {
+            id: filterInput
+            anchors { verticalCenter: parent.verticalCenter; left: parent.left; right: clearBtn.left; leftMargin: 8; rightMargin: 4 }
+            color: "#dce8f8"
+            font.pixelSize: 12
+            clip: true
+            onTextChanged: root.filterText = filterInput.text
+
+            // placeholder text shown when empty
+            Text {
+                anchors.fill: parent
+                text: "Filter expressions..."
+                color: "#555b6a"
+                font.pixelSize: 12
+                visible: filterInput.text === ""
+            }
+        }
+
+        // clear button — only visible while filter text is non-empty
+        Rectangle {
+            id: clearBtn
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 6 }
+            width: 16; height: 16
+            radius: 8
+            color: clearMouse.containsMouse ? "#3a3d4a" : "transparent"
+            visible: filterInput.text !== ""
+
+            Text {
+                anchors.centerIn: parent
+                text: "\u00D7"
+                color: "#b0b8c8"
+                font.pixelSize: 13
+            }
+
+            MouseArea {
+                id: clearMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: filterInput.text = ""
+            }
+        }
     }
 
     GridView {
         id: grid
         anchors {
-            top: titleLabel.bottom
-            left: parent.left; right: parent.right; bottom: buttonBar.top
+            top: filterBar.bottom
+            left: parent.left; right: parent.right; bottom: customExprRow.top
             margins: 10
             topMargin: 8
         }
@@ -42,7 +134,7 @@ Item {
         cellHeight: 28
         clip: true
 
-        model: root.variables
+        model: root.filteredExpressions
 
         delegate: Item {
 
@@ -54,7 +146,8 @@ Item {
             required property var modelData
 
             property string expression: String(modelData[0])
-            property bool selected: Boolean(modelData[1])
+            // read selection state from the root map so toggling persists across filter changes
+            property bool selected: root.selectionState[cellItem.expression] === true
 
             Rectangle {
                 anchors { fill: parent; margins: 3 }
@@ -77,13 +170,104 @@ Item {
                     onEntered: parent.color = cellItem.selected ? "#2a4a7a" : "#2e3040"
                     onExited:  parent.color = cellItem.selected ? "#2a4a7a" : "#23252e"
                     onClicked: {
-                        // toggle selection state
-                        cellItem.selected = !cellItem.selected
-                        // emit signal to notify of selection change, passing the variable name and new selection state
-                        root.selectionChanged(cellItem.expression, cellItem.selected)
+                        // compute new selection value by inverting the current state
+                        var newSelected = !root.selectionState[cellItem.expression]
+                        // replace the entire map object so QML detects the change and re-evaluates bindings
+                        var updated = Object.assign({}, root.selectionState)
+                        updated[cellItem.expression] = newSelected
+                        root.selectionState = updated
+                        // emit signal to notify of selection change
+                        root.selectionChanged(cellItem.expression, newSelected)
                     }
                 }
             }
+        }
+    }
+
+    // custom expression input section
+    Rectangle {
+        id: customExprRow
+        anchors { bottom: buttonBar.top; left: parent.left; right: parent.right }
+        height: root.expressionError !== "" ? 72 : 50
+        color: "#16171e"
+
+        // top separator
+        Rectangle {
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: 1
+            color: "#3a3d4a"
+        }
+
+        // section label
+        Text {
+            id: customExprLabel
+            anchors { left: parent.left; verticalCenter: addExprBtn.verticalCenter; leftMargin: 12 }
+            text: "Expression:"
+            color: "#808898"
+            font.pixelSize: 12
+        }
+
+        // add button
+        Rectangle {
+            id: addExprBtn
+            anchors { right: parent.right; top: parent.top; topMargin: 11; rightMargin: 10 }
+            width: 52; height: 28
+            radius: 4
+            color: addExprMouse.containsMouse ? "#3a6aaa" : "#2a5090"
+            border.color: "#5b9bd5"
+            border.width: 1
+            Text {
+                anchors.centerIn: parent
+                text: "Add"
+                color: "#ffffff"
+                font.pixelSize: 12
+            }
+            MouseArea {
+                id: addExprMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.customExpressionRequested(exprInput.text.trim())
+            }
+        }
+
+        // expression text input
+        Rectangle {
+            id: exprInputRect
+            anchors { left: customExprLabel.right; right: addExprBtn.left; top: addExprBtn.top; leftMargin: 6; rightMargin: 6 }
+            height: 28
+            radius: 4
+            color: "#23252e"
+            border.color: exprInput.activeFocus ? "#5b9bd5" : (root.expressionError !== "" ? "#c05050" : "#3a3d4a")
+            border.width: 1
+
+            TextInput {
+                id: exprInput
+                anchors { verticalCenter: parent.verticalCenter; left: parent.left; right: parent.right; leftMargin: 8; rightMargin: 8 }
+                color: "#dce8f8"
+                font.pixelSize: 12
+                clip: true
+                onTextChanged: root.expressionError = ""
+                Keys.onReturnPressed: root.customExpressionRequested(exprInput.text.trim())
+                Keys.onEnterPressed: root.customExpressionRequested(exprInput.text.trim())
+
+                // placeholder text shown when empty
+                Text {
+                    anchors.fill: parent
+                    text: "e.g. V(net1) / I(R1)"
+                    color: "#555b6a"
+                    font.pixelSize: 12
+                    visible: exprInput.text === ""
+                }
+            }
+        }
+
+        // error label — only visible when expression evaluation fails
+        Text {
+            anchors { top: exprInputRect.bottom; left: exprInputRect.left; topMargin: 5 }
+            text: root.expressionError
+            color: "#c05050"
+            font.pixelSize: 11
+            visible: root.expressionError !== ""
         }
     }
 

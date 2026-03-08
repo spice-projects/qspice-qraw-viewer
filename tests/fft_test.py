@@ -296,3 +296,82 @@ class TestFft(TestCase):
         df, f_nyquist = fft_frequency_range(x)
         # assert
         self.assertGreater(f_nyquist, 0.0)
+
+    def test_compute_fft_rectangular_single_tone_amplitude_correct(self):
+        # arrange — unit-amplitude sine with an integer number of cycles so the
+        # peak falls exactly on a bin and leakage is zero
+        n = 1024
+        fs = 1024.0
+        f_tone = 100.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.sin(2 * np.pi * f_tone * x)
+        # act
+        frequencies, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        # assert — amplitude at the tone bin must be 1.0 (±1 % tolerance)
+        peak_index = int(np.argmax(magnitude))
+        self.assertAlmostEqual(float(magnitude[peak_index]), 1.0, delta=0.01)
+
+    def test_compute_fft_hamming_window_amplitude_correct(self):
+        # arrange — same integer-cycle sine; Hamming window should still recover
+        # amplitude ≈ 1.0 once the coherent gain is divided out correctly
+        n = 1024
+        fs = 1024.0
+        f_tone = 100.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.sin(2 * np.pi * f_tone * x)
+        # act
+        frequencies, magnitude = compute_fft(x, y, window=WindowFunction.HAMMING, output=FftOutput.MAGNITUDE)
+        # assert — the peak amplitude must still be close to 1.0;
+        # if scale used 2/n instead of 2/sum(win) it would be ≈ 0.54 (Hamming coherent gain)
+        peak_index = int(np.argmax(magnitude))
+        self.assertAlmostEqual(float(magnitude[peak_index]), 1.0, delta=0.05)
+
+    def test_compute_fft_hanning_window_amplitude_correct(self):
+        # arrange
+        n = 1024
+        fs = 1024.0
+        f_tone = 100.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.sin(2 * np.pi * f_tone * x)
+        # act
+        _, magnitude = compute_fft(x, y, window=WindowFunction.HANNING, output=FftOutput.MAGNITUDE)
+        # assert — coherent gain for Hanning is 0.5; peak must still be ≈ 1.0
+        peak_index = int(np.argmax(magnitude))
+        self.assertAlmostEqual(float(magnitude[peak_index]), 1.0, delta=0.05)
+
+    def test_compute_fft_blackman_window_amplitude_correct(self):
+        # arrange
+        n = 1024
+        fs = 1024.0
+        f_tone = 100.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.sin(2 * np.pi * f_tone * x)
+        # act
+        _, magnitude = compute_fft(x, y, window=WindowFunction.BLACKMAN, output=FftOutput.MAGNITUDE)
+        # assert — coherent gain for Blackman is ≈ 0.42; peak must still be ≈ 1.0
+        peak_index = int(np.argmax(magnitude))
+        self.assertAlmostEqual(float(magnitude[peak_index]), 1.0, delta=0.05)
+
+    def test_compute_fft_dc_amplitude_is_one_for_unit_dc_signal(self):
+        # arrange — a constant signal of amplitude 1; dc bin should give 1.0
+        n = 512
+        fs = 1000.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.ones(n)
+        # act
+        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        # assert — DC bin (index 0) must equal 1.0
+        self.assertAlmostEqual(float(magnitude[0]), 1.0, delta=0.001)
+
+    def test_compute_fft_nyquist_bin_not_doubled_for_even_n(self):
+        # arrange — a cosine at exactly the Nyquist frequency (fs/2) with unit amplitude;
+        # for even n it falls exactly on the last rfft bin
+        n = 512
+        fs = 1000.0
+        f_nyq = fs / 2.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.cos(2 * np.pi * f_nyq * x)
+        # act
+        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        # assert — last bin amplitude must be 1.0, not 2.0 (which a missing halving would give)
+        self.assertAlmostEqual(float(magnitude[-1]), 1.0, delta=0.01)

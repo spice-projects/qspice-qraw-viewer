@@ -6,7 +6,8 @@ from PySide6.QtGraphs import QAbstractAxis, QLineSeries
 from PySide6.QtQuick import QQuickItem
 
 from .decimation_algorithm import DecimationAlgorithm, decimate_xy
-from .variable import Variable, VariableType
+from .expression import Expression
+from .expression_manager import ExpressionManager
 
 logger = logging.getLogger(__name__)
 
@@ -16,55 +17,64 @@ _DECIMATION_ALGORITHM = DecimationAlgorithm.M4
 
 class Chart:
 
-    def __init__(self, component: QQuickItem, abscissa: Variable, abscissa_from_index: int, abscissa_to_index: int, decimate_target: int):
+    def __init__(self, component: QQuickItem, expression_manager: ExpressionManager, abscissa: Expression, abscissa_from_index: int, abscissa_to_index: int, steps: int, decimate_target: int):
         # store component
         self._component = component
+        # store expression manager
+        self._expression_manager = expression_manager
         # store variables
         self._abscissa = abscissa
-        self._variables: list[Variable] = []
+        self._expressions: list[Expression] = []
         # current zoom window (x: in abscissa index, y: in ordinate percentages)
         self._zoom_window = (abscissa_from_index, 0.0, abscissa_to_index, 1.0)
+        # steps
+        self._steps = steps
+        self._step_points = len(abscissa.data)
         # store decimation target for later use when adding series
         self._decimate_target = decimate_target
         # track active series
-        self._series: dict[str, tuple[Variable, list[tuple[Variable, QAbstractAxis, list[QLineSeries], float, float]]]] = {}
-        # track one Y axis usage
-        self._y_axes: dict[VariableType, QAbstractAxis] = {}
+        self._series: dict[str, tuple[Expression, list[tuple[Expression, QAbstractAxis, list[QLineSeries], float, float]]]] = {}
+        # track Y axis usage
+        self._y_axes: dict[str, QAbstractAxis] = {}
         # axis ranges
         self._axis_ranges: dict[QAbstractAxis, tuple[float, float]] = {}
 
     @property
-    def variables(self) -> list[Variable]:
-        # return copy of variables list to prevent external mutation of the chart's internal state, which would cause inconsistencies between the plotted series and the variables list
-        return self._variables[:]
+    def expressions(self) -> list[Expression]:
+        # return copy of expressions list to prevent external mutation of the chart's internal state, which would cause inconsistencies between the plotted series and the expressions list
+        return self._expressions[:]
 
-    def render(self, abscissa_label: str, abscissa_scale: str, initial_variables: set[Variable]):
+    @property
+    def abscissa(self) -> Expression:
+        return self._abscissa
+
+    def render(self, abscissa_label: str, abscissa_scale: str, initial_expressions: set[Expression]):
         # x0 and x1
         abscissa_left_value = float(self._abscissa.values[self._zoom_window[0]])
         abscissa_right_value = float(self._abscissa.values[self._zoom_window[2] - 1])
         # initialize chart component
-        self._component.initialize(abscissa_label, self._abscissa.type.value.unit, abscissa_scale, abscissa_left_value, abscissa_right_value)
-        # render all variables as series
-        self.plot_series(initial_variables)
+        self._component.initialize(abscissa_label, self._abscissa.unit, abscissa_scale, abscissa_left_value, abscissa_right_value)
+        # render all expressions as series
+        self.plot_series(initial_expressions)
         # auto range axes based on the added series
         self.auto_range()
 
-    def plot_series(self, variables: set[Variable]):
-        # abscissa values — shared across all ordinate steps, will be paired with y below
+    def plot_series(self, expressions: set[Expression]):
+        # apply zoom window to abscissa — shared across all ordinate steps, will be paired with y below
         abscissa_values = self._abscissa.values[self._zoom_window[0]:self._zoom_window[2]]
         # series to render and remove from the chart
-        series_to_render: list = []
-        series_to_remove: list = []
+        series_to_render: list[tuple[str, list[QLineSeries]]] = []
+        series_to_remove: list[tuple[str, list[QLineSeries]]] = []
         # labels to remove from the chart
         labels_to_remove: list[str] = []
-        # loop existing series to find those that need to be removed (those whose variable is not in the new variables list)
-        for label, (variable, ordinate_series) in self._series.items():
+        # loop existing series to find those that need to be removed (those whose expression is not in the new expressions list)
+        for label, (expression, ordinate_series) in self._series.items():
             # check expression should be removed
-            if variable not in variables:
+            if expression not in expressions:
                 # log information
-                logger.debug("Removing series for variable '%s' from chart", variable.name)
-                # remove from variables
-                self._variables.remove(variable)
+                logger.debug("Removing series for expression '%s' from chart", expression.name)
+                # remove from expressions
+                self._expressions.remove(expression)
                 # enqueue series for removal
                 for ordinate_variant, _, series_list, _, _ in ordinate_series:
                     series_to_remove.append([ordinate_variant.name, series_list])
@@ -73,22 +83,22 @@ class Chart:
         # update dictionary outside loop
         for label in labels_to_remove:
             del self._series[label]
-        # loop variables that should be plotted
-        for ordinate in variables:
+        # loop expressions that should be plotted
+        for ordinate in expressions:
             # skip if a series with this label is already plotted
             if ordinate.name in self._series:
                 continue
-            # store variable
-            self._variables.append(ordinate)
+            # store expression
+            self._expressions.append(ordinate)
             # ordinate series
-            ordinate_series: list[tuple[Variable, QAbstractAxis, list[QLineSeries], float, float]] = []
+            ordinate_series: list[tuple[Expression, QAbstractAxis, list[QLineSeries], float, float]] = []
             # check ordinate represents a complex number, if this is the case split measurement into magnitude and phase
-            for ordinate_variant in [ordinate.magnitude, ordinate.phase] if ordinate.complex else [ordinate]:
-                # find y axis for variable type
-                y_axis = self._get_y_axis(ordinate_variant.type)
+            for ordinate_variant in self._get_expressions_to_plot(ordinate):
+                # find y axis for measurement type
+                y_axis = self._get_y_axis(ordinate_variant.unit)
                 if y_axis is None:
                     # log information
-                    logger.warning(f"Cannot add series '{ordinate_variant.name}' of variable type {ordinate_variant.type.name} to chart — maximum number of Y axes reached")
+                    logger.warning(f"Cannot add series '{ordinate_variant.name}' of measurement type {ordinate_variant.unit} to chart — maximum number of Y axes reached")
                     # exit loop
                     break
                 # ordinate series
@@ -97,9 +107,9 @@ class Chart:
                 min_value = float("inf")
                 max_value = float("-inf")
                 # loop steps
-                for step in range(self._abscissa.steps):
-                    # ordinate variant values for this step
-                    ordinate_values = ordinate_variant.step_values(step)[self._zoom_window[0]:self._zoom_window[2]]
+                for step in range(self._steps):
+                    # ordinate variant values for this step (as contiguous array in memory), apply zoom window
+                    ordinate_values = ordinate_variant.values[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
                     # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
                     x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
                     # create series and hand buffers directly to Qt — no Python loop
@@ -140,8 +150,12 @@ class Chart:
         _, y_top_ratio, _, y_bottom_ratio = self._zoom_window
         # update axis ranges based on collected min and max values for each variable type
         for y_axis, (y_min, y_max) in self._axis_ranges.items():
+            # min and max values
+            y_range = y_max - y_min
+            if y_range == 0:
+                y_range = abs(y_max) * 0.01 if y_max != 0 else 1.0
             # set y axis range
-            y_axis.setRange(y_min + y_top_ratio * (y_max - y_min), y_min + y_bottom_ratio * (y_max - y_min))
+            y_axis.setRange(y_min + y_top_ratio * y_range - 0.01 * y_range, y_min + y_bottom_ratio * y_range + 0.01 * y_range)
 
     def update_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
         # vertical changes flag
@@ -201,57 +215,77 @@ class Chart:
                 y_axis.setRange(y_min + y_top_ratio * (y_max - y_min), y_min + y_bottom_ratio * (y_max - y_min))
 
     def clear(self):
-        # Qt enqueues the visual removal of series asynchronously. Python owns the QLineSeries, so we must NOT let
-        # Python GC them until Qt has finished processing the removal queue.
+        # Qt enqueues the visual removal of series asynchronously. Python owns the QLineSeries, so we must NOT let Python GC them until Qt has finished processing the removal queue.
         old_series = self._series
         old_axes = self._y_axes
-        old_variables = self._variables
+        old_expressions = self._expressions
         # reset internal state
         self._series = {}
         self._y_axes = {}
-        self._variables = []
+        self._expressions = []
         # reset zoom window (vertical axes only, keep horizontal range)
         self._zoom_window = (self._zoom_window[0], 0.0, self._zoom_window[2], 1.0)
         # enqueue Qt-side removal
         self._component.removeAllSeries()
         # release stash after Qt finishes its async processing
-        QTimer.singleShot(1000, lambda: (old_series.clear(), old_axes.clear(), old_variables.clear()))
+        QTimer.singleShot(1000, lambda: (old_series.clear(), old_axes.clear(), old_expressions.clear()))
 
-    def sample_at(self, x_ratio: float) -> list[tuple[str, str, float]]:
-        """Return (name, unit, value) tuples for all plotted ordinate series at a given x-axis position.
-
-        x_ratio is a 0-1 fraction of the current zoom window (0 = left edge, 1 = right edge).
-        Values are sampled from step 0 using nearest-sample lookup on the full-resolution data.
-        """
+    def sample_at(self, x_ratio: float) -> list[tuple[str, str, list[float]]]:
+        # check series are plotted
         if not self._series:
             return []
-        # compute the nearest sample index within the current zoom window
+        # x zoom window indexes
         from_index, _, to_index, _ = self._zoom_window
+        # compute the nearest sample index within the current zoom window
         idx = max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
         # collect one (name, unit, value) tuple per plotted variant (magnitude/phase counted separately)
-        result: list[tuple[str, str, float]] = []
+        result: list[tuple[str, str, list[float]]] = []
+        # loop series
         for _, (_, ordinate_series) in self._series.items():
-            for ordinate_variant, _, _, _, _ in ordinate_series:
-                value = float(ordinate_variant.step_values(0)[idx])
-                result.append((ordinate_variant.name, ordinate_variant.type.value.unit, value))
+            # loop variants for this series (magnitude/phase)
+            for ordinate_variant, _, series_list, _, _ in ordinate_series:
+                # values (per step)
+                values: list[float] = []
+                # loop series list (steps)
+                for step, _ in enumerate(series_list):
+                    # value for step at index
+                    values.append(float(ordinate_variant.values[step * self._step_points + idx]))
+                # append to result (name, unit, value)
+                result.append((ordinate_variant.name, ordinate_variant.unit, values))
+        # exit
         return result
 
-    def _get_y_axis(self, variable_type: VariableType) -> QAbstractAxis | None:
-        # existing axis for variable type
-        axis = self._y_axes.get(variable_type)
+    def _get_expressions_to_plot(self, expression: Expression) -> list[Expression]:
+        # check we can plot expression as is
+        if not expression.complex:
+            return [expression]
+        # magniture
+        magnitude_expression = self._expression_manager.evaluate(f"abs({expression.name})")
+        if not magnitude_expression:
+            return []
+        # phase
+        phase_expression = self._expression_manager.evaluate(f"angle({expression.name})")
+        if not phase_expression:
+            return []
+        # exit
+        return [magnitude_expression, phase_expression]
+
+    def _get_y_axis(self, unit: str) -> QAbstractAxis | None:
+        # existing axis for measurement type
+        axis = self._y_axes.get(unit)
         if axis is not None:
             return axis
         # log information
-        logger.debug("Reserving Y axis [%d] for variable type: %s", len(self._y_axes), variable_type.name)
+        logger.debug("Reserving Y axis [%d] for measurement type: %s", len(self._y_axes), unit)
         # number of y axis in use
         counter = len(self._y_axes)
         # check we have reached the maximum number of Y axes allowed by this chart type
         if counter == 4:
             return None
         # create axis
-        axis = self._component.createYAxis(f"Y Axis {counter + 1}", variable_type.value.unit)
-        # reserve axis for this variable type
-        self._y_axes[variable_type] = axis
+        axis = self._component.createYAxis(f"Y Axis {counter + 1}", unit)
+        # reserve axis for this measurement type
+        self._y_axes[unit] = axis
         # exit
         return axis
 
@@ -274,9 +308,9 @@ class Chart:
                         min_value = float("inf")
                         max_value = float("-inf")
                         # loop steps
-                        for step in range(self._abscissa.steps):
+                        for step in range(self._steps):
                             # ordinate variant values for this step
-                            ordinate_values = ordinate_variant.step_values(step)[self._zoom_window[0]:self._zoom_window[2]]
+                            ordinate_values = ordinate_variant.values[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
                             # update series with non-decimated data
                             series_list[step].replaceNp(abscissa_values, ordinate_values)
                             # update min and max values
@@ -298,9 +332,9 @@ class Chart:
                     min_value = float("inf")
                     max_value = float("-inf")
                     # loop steps
-                    for step in range(self._abscissa.steps):
+                    for step in range(self._steps):
                         # ordinate variant values for this step
-                        ordinate_values = ordinate_variant.step_values(step)[self._zoom_window[0]:self._zoom_window[2]]
+                        ordinate_values = ordinate_variant.values[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
                         # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
                         x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
                         # update series with decimated data

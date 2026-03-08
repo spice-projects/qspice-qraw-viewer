@@ -1,6 +1,7 @@
 """Evaluator that walks an expression AST and produces an :class:`~viewer.expression.Expression`."""
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 import numpy as np
@@ -29,6 +30,11 @@ _FUNCTION_IMPLS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
     "exp":   np.exp,
 }
 
+
+# matches the two-node differential probe form produced by the parser, e.g. "V(a, b)" or
+# "V(net-foo, 0)"; group 1 = function name, group 2 = first node, group 3 = second node.
+# Node names can contain any character except ',' and ')' (bullets, slashes, hashes, etc.).
+_TWO_ARG_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(([^,]+),\s*([^)]+)\)$")
 
 # built-in numeric constants recognized as named identifiers in SPICE/QSPICE expressions.
 # Each entry is a (value, unit) pair so that unit propagation works correctly.
@@ -135,8 +141,29 @@ class ExpressionEvaluator:
             if entry is not None:
                 const_value, const_unit = entry
                 return np.array(const_value), const_unit
-            var = self._lookup(node.name, context)
-            return var.data, var.unit
+            # try direct lookup first (handles variables whose name already includes the probe syntax)
+            try:
+                var = self._lookup(node.name, context)
+                return var.data, var.unit
+            except ValueError:
+                pass
+            # two-node differential form: FUNC(a, b) = FUNC(a) - FUNC(b) per SPICE convention;
+            # node "0" is the SPICE ground reference and is never stored as a variable (it is
+            # always 0 V), so it is treated as absent and substituted with zeros.
+            m = _TWO_ARG_RE.match(node.name)
+            if m:
+                func = m.group(1)
+                arg_a = m.group(2).strip()
+                arg_b = m.group(3).strip()
+                va = None if arg_a == "0" else self._lookup(f"{func}({arg_a})", context)
+                vb = None if arg_b == "0" else self._lookup(f"{func}({arg_b})", context)
+                # use whichever non-ground node is available as the reference for shape and unit
+                ref = va if va is not None else vb
+                if ref is not None:
+                    da = va.data if va is not None else np.zeros_like(ref.data)
+                    db = vb.data if vb is not None else np.zeros_like(ref.data)
+                    return da - db, ref.unit
+            raise ValueError(f"undefined variable: {node.name!r}")
         # function call: delegate to _eval_function
         if isinstance(node, FunctionCallNode):
             return self._eval_function(node, context)

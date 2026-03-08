@@ -6,7 +6,8 @@ from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
-from .variable import Variable
+from .expression import Expression
+from .expression_manager import ExpressionManager
 
 logger = logging.getLogger(__name__)
 
@@ -16,21 +17,20 @@ _BG = "#1a1b1e"
 
 class AddPlotDialog(QDialog):
 
-    def __init__(self, variables: list[Variable], selected_variables: list[Variable], parent=None):
+    def __init__(self, expressions_manager: ExpressionManager, selected_expressions: list[Expression], parent=None):
         super().__init__(parent)
-        # store variables for index mapping when reading back the selection
-        self._variables = variables
-        self._selected_variables: set[Variable] = set(selected_variables)
+        # store expressions for index mapping when reading back the selection
+        self._expressions_manager = expressions_manager
+        self._selected_expressions: set[Expression] = set(selected_expressions)
         # window setup
         self.setWindowTitle("Add Plot")
         self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.resize(560, 420)
-        # create the QML view — inject variable names before loading so QML can bind to them immediately
+        self.resize(560, 480)
+        # create the QML view — inject expression names before loading so QML can bind to them immediately
         self._qml_view = QQuickView()
         self._qml_view.statusChanged.connect(self._on_qml_ready)
         self._qml_view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
         self._qml_view.setColor(QColor(_BG))
-        self._qml_view.rootContext().setContextProperty("variableNames", [v.name for v in variables])
         self._qml_view.setSource(QUrl.fromLocalFile(str(_QML_FILE)))
         # embed the QML view into the dialog
         container = QWidget.createWindowContainer(self._qml_view, self)
@@ -49,26 +49,44 @@ class AddPlotDialog(QDialog):
         root.dialogAccepted.connect(self.accept)
         root.dialogRejected.connect(self.reject)
         root.selectionChanged.connect(self._on_selection_changed)
+        root.customExpressionRequested.connect(self._on_custom_expression_requested)
         # initialize view
-        root.initialize([[v.name, v in self._selected_variables] for v in self._variables])
+        root.initialize([[v.name, v in self._selected_expressions] for v in self._expressions_manager.expressions])
 
     @Slot(str, bool)
     def _on_selection_changed(self, expression: str, selected: bool):
         # log information
         logger.debug("User %s expression: %s", "selected" if selected else "deselected", expression)
-        # handle selection change from QML — update the selected variables list
-        variable = next((v for v in self._variables if v.name == expression), None)
-        # toggle variable in selected list based on selection state
-        if variable is not None:
-            # if selected, add to selected variables if not already there; if deselected, remove from selected variables if present
+        # handle selection change from QML — update the selected expression list
+        expression = next((v for v in self._expressions_manager.expressions if v.name == expression), None)
+        # toggle expression in selected list based on selection state
+        if expression is not None:
+            # if selected, add to selected expressions if not already there; if deselected, remove from selected expressions if present
             if selected:
-                # append variable to selected set
-                self._selected_variables.add(variable)
+                # append expression to selected set
+                self._selected_expressions.add(expression)
                 # exit
                 return
-            # remove variable from selected set
-            self._selected_variables.remove(variable)
+            # remove expression from selected set
+            self._selected_expressions.remove(expression)
+
+    @Slot(str)
+    def _on_custom_expression_requested(self, text: str):
+        # ignore blank input
+        text = text.strip()
+        if not text:
+            return
+        # evaluate the expression through the manager; returns None on failure
+        expression = self._expressions_manager.evaluate(text, text)
+        root = self._qml_view.rootObject()
+        if expression is None:
+            root.setExpressionError("Invalid expression")
+            return
+        # add to selected set
+        self._selected_expressions.add(expression)
+        # update QML list and selection state; addExpression handles deduplication
+        root.addExpression(expression.name, True)
 
     @property
-    def selected_variables(self) -> set[Variable]:
-        return self._selected_variables
+    def selected_expressions(self) -> set[Expression]:
+        return self._selected_expressions

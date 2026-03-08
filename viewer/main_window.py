@@ -9,10 +9,12 @@ from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
 
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
+from .expression import Expression
+from .expression_manager import ExpressionManager
 from .fft import FftOutput, compute_fft, is_uniform
 from .fft_dialog import FftDialog
+from .jupyter_window import JupyterWindow
 from .qraw_file import AbscissaScale, QRawFile
-from .variable import Variable, VariableType
 
 logger = logging.getLogger(__name__)
 
@@ -27,41 +29,74 @@ _MIN_STATUS_INTERVAL = 1.0 / 30
 
 def _format_value(value: float, unit: str) -> str:
     """Format a numeric value with SI prefix and unit, mirroring the QML applyUnit function."""
+    # absolute value for prefix selection
     abs_val = abs(value)
+    # giga
     if abs_val >= 1e9:
         return f"{value / 1e9:.2f} G{unit}"
+    # mega
     if abs_val >= 1e6:
         return f"{value / 1e6:.2f} M{unit}"
+    # kilo
     if abs_val >= 1e3:
         return f"{value / 1e3:.2f} k{unit}"
+    # base unit
+    if abs_val >= 1.0:
+        return f"{value:.2f} {unit}"
+    # zero
+    if abs_val < 1e-15:
+        return f"0 {unit}"
+    # femto
+    if abs_val < 1e-12:
+        return f"{value * 1e15:.2f} f{unit}"
+    # pico
     if abs_val < 1e-9:
         return f"{value * 1e12:.2f} p{unit}"
+    # nano
     if abs_val < 1e-6:
         return f"{value * 1e9:.2f} n{unit}"
+    # micro
     if abs_val < 1e-3:
         return f"{value * 1e6:.2f} µ{unit}"
-    if abs_val < 0.09:
-        return f"{value * 1e3:.2f} m{unit}"
-    return f"{value:.2f} {unit}"
+    # milli
+    return f"{value * 1e3:.2f} m{unit}"
+
+
+def _format_values(name: str, values: list[float], unit: str) -> str:
+    # check a single value is available
+    if len(values) == 1:
+        return f"{name} = {_format_value(values[0], unit)}"
+    # multiple values: format each and join with commas
+    formatted_values = ", ".join(_format_value(v, unit) for v in values)
+    # exit
+    return f"{name} = [{formatted_values}]"
 
 
 class MainWindow(QMainWindow):
 
     def __init__(self, qraw_file: QRawFile):
         super().__init__()
-        # store file data for later use in the UI
-        self.qraw_file = qraw_file
+        # extract information from file
+        self._abscissa = qraw_file.abscissa
+        self._abscissa_scale = qraw_file.abscissa_scale
+        self._expression_manager = qraw_file.expression_manager
+        self._steps = qraw_file.steps
+        self._plot_suggestions = qraw_file.get_plot_suggestions()
+        # store the simulation file path for use by the Jupyter integration
+        self._qraw_path = qraw_file.filename
         # set window title to include the loaded filename
-        self.setWindowTitle(f"QSPICE v2 - {qraw_file.filename.name}")
+        self.setWindowTitle(f"QSPICE - {qraw_file.filename.name}")
         # apply dark background stylesheet to the window chrome
         self.setStyleSheet(f"QMainWindow {{ background: {_BG}; }}")
         # initialize data structures
         self._charts: list[Chart] = []
         # keep FFT result windows alive to prevent garbage collection
         self._fft_windows: list[MainWindow] = []
+        # keep Jupyter windows alive to prevent garbage collection
+        self._jupyter_windows: list[JupyterWindow] = []
         # default horizontal zoom
         self._abscissa_from_index = 0
-        self._abscissa_to_index = self.qraw_file.abscissa_points
+        self._abscissa_to_index = len(self._abscissa.data)
         # single QQuickView hosts the entire multi-chart scene — one Metal swap chain
         self._qml_view = QQuickView()
         self._qml_view.statusChanged.connect(self._on_qml_ready)
@@ -124,6 +159,13 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        # Tools menu
+        tools_menu = menu_bar.addMenu("&Tools")
+        # Tools | Open Jupyter
+        jupyter_action = QAction("Open Jupyter...", self)
+        jupyter_action.triggered.connect(self._on_open_jupyter)
+        tools_menu.addAction(jupyter_action)
+
         # Window menu
         window_menu = menu_bar.addMenu("&Window")
         # Window | Add Window
@@ -137,6 +179,17 @@ class MainWindow(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(lambda: None)
         help_menu.addAction(about_action)
+
+    @Slot()
+    def _on_open_jupyter(self) -> None:
+        # create a new Jupyter window for the currently loaded simulation file
+        window = JupyterWindow(self._qraw_path)
+        # keep a reference to prevent the window from being garbage collected
+        self._jupyter_windows.append(window)
+        # show a status bar message while the server starts; clear it when the window appears
+        self.statusBar().showMessage("Starting JupyterLab…")
+        window.ready.connect(lambda: self.statusBar().clearMessage())
+        # window.show() is intentionally absent — JupyterWindow shows itself when fully loaded
 
     def _on_file_open(self):
         # native file dialog to pick a QRAW file
@@ -152,39 +205,35 @@ class MainWindow(QMainWindow):
             return
 
     def _populate_charts(self):
-        # this is a calculated field, do it once per file and cache it
-        plot_suggestions = self.qraw_file.plot_suggestions
         # fall back to one empty chart when there are none
-        if not plot_suggestions:
+        if not self._plot_suggestions:
             # add a single chart with the default type for this file, but no series (empty)
             self._add_chart([])
             # exit
             return
         # loop suggestions — each suggestion carries its own chart type
-        for suggestion in plot_suggestions:
+        for suggestion in self._plot_suggestions:
             # append chart using the type encoded in the suggestion
-            self._add_chart(suggestion.variables)
+            self._add_chart(suggestion.expressions)
 
-    def _add_chart(self, variables: list[Variable]):
+    def _add_chart(self, expressions: list[Expression]):
         # chart index
         chart_index = len(self._charts)
-        # abscissa
-        abscissa = self.qraw_file.variables[0]
         # create chart ui component in QML
         self._root.addChart()
         # get a reference to the chart's QML object so we can manipulate it
         chart_root = self._root.getChart(chart_index)
         # create chart instance
-        chart = Chart(chart_root, abscissa, self._abscissa_from_index, self._abscissa_to_index, self._decimate_target)
+        chart = Chart(chart_root, self._expression_manager, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self._steps, self._decimate_target)
         # add it to the list of charts so we can keep track of it
         self._charts.append(chart)
         # render chart
-        chart.render("", self.qraw_file.abscissa_scale.value, set(variables))
+        chart.render("", self._abscissa_scale.value, set(expressions))
 
     @Slot(int, float, float, float)
     def _on_horizontal_zoom(self, chart_index: int, x_left_ratio: float, x_right_ratio: float, zoom_factor: float):
         # calculate horizontal axis indices from the supplied ratios
-        total = len(self.qraw_file.variables[0].values)
+        total = len(self._abscissa.data)
         from_index = max(0, min(int(self._abscissa_from_index + x_left_ratio * (self._abscissa_to_index - self._abscissa_from_index)), total - 1))
         to_index = max(0, min(int(self._abscissa_from_index + x_right_ratio * (self._abscissa_to_index - self._abscissa_from_index)), total))
         # allow zoom-in beyond pixel width, only enforce a minimum window of 2 points
@@ -242,7 +291,7 @@ class MainWindow(QMainWindow):
         logger.debug("User requested zoom to fit on chart at index: %d", chart_index)
         # reset horizontal axis indices to show the full range of the abscissa
         self._abscissa_from_index = 0
-        self._abscissa_to_index = len(self.qraw_file.variables[0].values)
+        self._abscissa_to_index = len(self._abscissa.data)
         # update charts
         for index, chart in enumerate(self._charts):
             # check if this is the chart that triggered the zoom to fit action
@@ -267,11 +316,9 @@ class MainWindow(QMainWindow):
     def _on_menu_zoom_abscissa_extent(self, chart_index: int):
         # log information
         logger.debug("User requested zoom abscissa extent on chart at index: %d", chart_index)
-        # abscissa
-        abscissa = self.qraw_file.variables[0]
         # update fields
         self._abscissa_from_index = 0
-        self._abscissa_to_index = len(abscissa.values)
+        self._abscissa_to_index = len(self._abscissa.values)
         # update charts
         for chart in self._charts:
             # update zoom window
@@ -283,15 +330,15 @@ class MainWindow(QMainWindow):
         logger.debug("User requested adding/removing plots on chart at index: %d", chart_index)
         # find chart at index
         chart = self._charts[chart_index]
-        # open the add plot dialog — skip index 0 (abscissa)
-        dialog = AddPlotDialog(self.qraw_file.variables[1:], chart.variables, self)
+        # open the add plot dialog
+        dialog = AddPlotDialog(self._expression_manager, chart.expressions, self)
         # exit if the user cancelled
         if dialog.exec() != AddPlotDialog.DialogCode.Accepted:
             return
-        # plot selected variables on the chart
-        chart.plot_series(dialog.selected_variables)
+        # plot selected expressions on the chart
+        chart.plot_series(dialog.selected_expressions)
         # auto range axes to include the newly added series (wait for QT event loop)
-        QTimer.singleShot(100, lambda: (chart.auto_range()))
+        QTimer.singleShot(250, lambda: (chart.auto_range()))
 
     @Slot(int)
     def _on_menu_delete_all_plots(self, chart_index: int):
@@ -306,7 +353,7 @@ class MainWindow(QMainWindow):
     def _on_menu_add_window(self, chart_index: int):
         # log information
         logger.debug("User requested adding a new window at index: %d", chart_index)
-        # add a new chart with no pre-populated variables
+        # add a new chart with no pre-populated expressions
         self._add_chart([])
 
     @Slot(int)
@@ -323,55 +370,58 @@ class MainWindow(QMainWindow):
         logger.debug("User requested FFT on chart at index: %d", chart_index)
         # find chart
         chart = self._charts[chart_index]
-        # abscissa variable (index 0 is always the abscissa)
-        abscissa = self.qraw_file.variables[0]
-        # collect real-valued ordinate variables currently plotted on this chart
-        variables = [v for v in chart.variables if not v.complex and v.type != VariableType.TIME]
-        if not variables:
-            # log warning — no suitable variables to transform
-            logger.warning("No suitable time-domain variables to FFT on chart %d", chart_index)
+        # collect real-valued ordinate expressions currently plotted on this chart
+        expressions = [v for v in chart.expressions if not v.complex and v != chart.abscissa]
+        if not expressions:
+            # log warning — no suitable expressions to transform
+            logger.warning("No suitable time-domain expressions to FFT on chart %d", chart_index)
+            # exit
             return
         # check for non-uniform sampling and log a warning; the dialog will proceed — fft.py will resample automatically
-        if not is_uniform(abscissa.values):
+        if not is_uniform(self._abscissa.values):
             # log warning — FFT will resample to a uniform grid before computing
             logger.warning("Chart %d abscissa is non-uniformly sampled; FFT will resample to uniform grid", chart_index)
         # open FFT settings dialog
-        dialog = FftDialog(variables, abscissa, self._abscissa_from_index, self._abscissa_to_index, self)
+        dialog = FftDialog(expressions, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self)
         if dialog.exec() != FftDialog.DialogCode.Accepted:
             return
         # retrieve user selections
-        variable = dialog.result_variable
+        expression = dialog.result_variable
         from_index = dialog.result_from_index
         to_index = dialog.result_to_index
         window = dialog.result_window
         zero_pad = dialog.result_zero_pad
         normalize = dialog.result_normalize
         output = dialog.result_output
-        # extract data slice for step 0 (first / only simulation step)
-        x = abscissa.values[from_index:to_index]
-        y = variable.step_values(0)[from_index:to_index]
-        # compute FFT using numpy
+        # number of samples per step (abscissa is already trimmed to one period)
+        step_points = len(self._abscissa.data)
+        # extract the step-0 data slice within the user-selected range
+        x = self._abscissa.values[from_index:to_index]
+        y = expression.values[0:step_points][from_index:to_index]
         try:
+            # compute FFT using numpy
             frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output)
         except ValueError:
             # log exception and abort when computation fails
-            logger.exception("FFT computation failed for variable '%s'", variable.name)
+            logger.exception("FFT computation failed for expression '%s'", expression.name)
             return
-        # determine variable type based on FFT output
-        fft_variable_type = VariableType.PHASE if output == FftOutput.PHASE else VariableType.VOLTAGE
+        # determine unit based on FFT output type
+        fft_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else "V")
         # guard against an unexpectedly empty result (compute_fft guarantees non-empty on success)
         if len(frequencies) == 0:
             # log error and abort
-            logger.error("FFT computation returned empty result for variable '%s'", variable.name)
+            logger.error("FFT computation returned empty result for expression '%s'", expression.name)
             return
-        # create frequency variable for the abscissa (index 0)
-        freq_variable = Variable(index=0, name="Frequency", type=VariableType.FREQUENCY, values=frequencies)
-        # name for the FFT result variable
-        fft_variable_name = f"FFT({variable.name})"
-        # create FFT result variable (index 1)
-        fft_variable = Variable(index=1, name=fft_variable_name, type=fft_variable_type, values=fft_values)
-        # create a synthetic QRawFile with frequency at index 0 and FFT values at index 1
-        fft_qraw = QRawFile(filename=Path(f"fft_{variable.name}.qraw"), title=f"FFT – {variable.name}", date="", plotname="FFT", complex=False, stepped=False, abscissa="", abscissa_min=float(frequencies[0]), abscissa_max=float(frequencies[-1]), abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=f"\xab{fft_variable_name}\xbb", num_points=len(frequencies), variables=[freq_variable, fft_variable])
+        # name for the FFT result expression
+        fft_expression_name = f"FFT({expression.name})"
+        # create frequency expression for the abscissa
+        freq_expression = Expression("Frequency", frequencies, "Hz")
+        # create FFT result expression
+        fft_expression = Expression(fft_expression_name, fft_values, fft_unit)
+        # build expression manager with both expressions so plot suggestions work
+        expression_manager = ExpressionManager([freq_expression, fft_expression])
+        # create a synthetic QRawFile with frequency abscissa and FFT values
+        fft_qraw = QRawFile(filename=Path(f"fft_{expression.name}.qraw"), title=f"FFT – {expression.name}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=f"\xab{fft_expression_name}\xbb", expression_manager=expression_manager)
         # create a new MainWindow to render the FFT result using the existing infrastructure
         fft_window = MainWindow(fft_qraw)
         # keep reference alive to prevent garbage collection
@@ -385,28 +435,32 @@ class MainWindow(QMainWindow):
         now = time.monotonic()
         if now - self._last_status_time < _MIN_STATUS_INTERVAL:
             return
+        # update timestamp of last status update
         self._last_status_time = now
         # guard against invalid chart index
         if chart_index < 0 or chart_index >= len(self._charts):
             return
+        # chart at index
         chart = self._charts[chart_index]
         # compute abscissa index within the current zoom window
         from_index, _, to_index, _ = chart._zoom_window
+        # index within the zoom window based on the supplied x_ratio
         idx = max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
         # retrieve the stored abscissa value (may be in log space for decade/octave scales)
-        abscissa = self.qraw_file.variables[0]
-        x_stored = float(abscissa.values[idx])
+        x_stored = float(self._abscissa.values[idx])
         # convert stored value back to physical abscissa value
-        if self.qraw_file.abscissa_scale == AbscissaScale.DECADE:
+        if self._abscissa_scale == AbscissaScale.DECADE:
             x_actual = 10 ** x_stored
-        elif self.qraw_file.abscissa_scale == AbscissaScale.OCTAVE:
+        elif self._abscissa_scale == AbscissaScale.OCTAVE:
             x_actual = 2 ** x_stored
         else:
             x_actual = x_stored
-        # compose status string: x value then one token per y series
-        parts = [f"{abscissa.name} = {_format_value(x_actual, abscissa.type.value.unit)}"]
-        for name, unit, value in chart.sample_at(x_ratio):
-            parts.append(f"{name} = {_format_value(value, unit)}")
+        # append abscissa value
+        parts = [_format_values(self._abscissa.name, [x_actual], self._abscissa.unit)]
+        # process samples from chart
+        for name, unit, values in chart.sample_at(x_ratio):
+            parts.append(_format_values(name, values, unit))
+        # update status bar with the composed string
         self.statusBar().showMessage("    ".join(parts))
 
     @Slot(int)
