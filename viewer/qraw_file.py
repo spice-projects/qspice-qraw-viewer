@@ -322,7 +322,7 @@ class QRawFile:
                 for alias_name, alias_expression in aliasses.items():
                     try:
                         # evaluate expression using the variables we have so far; this allows aliasses to reference previously-defined aliasses as long as there are no circular references
-                        expression_manager.evaluate(alias_expression)
+                        expression_manager.evaluate(alias_expression, alias_name)
                     except Exception as ex:
                         # log error but continue processing other aliasses
                         logger.error("Failed to evaluate expression '%s': %s", alias_name, ex)

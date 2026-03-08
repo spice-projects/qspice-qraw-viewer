@@ -10,8 +10,6 @@ from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
 from .expression import Expression
-from .expression_evaluator import ExpressionEvaluator
-from .expression_parser import ExpressionParser
 from .fft import FftOutput, compute_fft, is_uniform
 from .fft_dialog import FftDialog
 from .qraw_file import AbscissaScale, QRawFile

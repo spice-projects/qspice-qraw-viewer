@@ -18,21 +18,22 @@ class ExpressionManager:
 
     @property
     def expressions(self) -> list[Expression]:
+        # do not show calculated expressions in the list of expressions
         return list(self._context.values())
 
-    def evaluate(self, expr_str: str) -> Expression | None:
+    def evaluate(self, expression: str, name: str | None = None) -> Expression | None:
         # check expression has been evaluated before
-        result = self._context.get(expr_str, None)
+        result = self._context.get(expression, None)
         if result is None:
             try:
                 # parse the expression string into an AST
-                ast = self._parser.parse(expr_str)
+                ast = self._parser.parse(expression)
                 # evaluate the AST using the provided context
-                result = self._evaluator.evaluate(ast, self._context, expr_str)
+                result = self._evaluator.evaluate(ast, self._context, name, "expression manager")
                 # update context with the evaluated expression for future reference
-                self._context[expr_str] = result
-            except Exception as e:
+                self._context[name or expression] = result
+            except ValueError as e:
                 # log information
-                logger.warning("Failed to evaluate expression %r: %s", expr_str, e)
+                logger.warning("Failed to evaluate expression %r: %s", expression, e)
         # exit
         return result
