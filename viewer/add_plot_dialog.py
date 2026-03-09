@@ -80,8 +80,12 @@ class AddPlotDialog(QDialog):
         expression = self._expressions_manager.evaluate(text, text)
         root = self._qml_view.rootObject()
         if expression is None:
+            # set error state on the input field in QML; the user can correct and resubmit without closing the dialog
             root.setExpressionError("Invalid expression")
+            # exit
             return
+        # log information
+        logger.debug("User added custom expression: %s", text)
         # add to selected set
         self._selected_expressions.add(expression)
         # update QML list and selection state; addExpression handles deduplication

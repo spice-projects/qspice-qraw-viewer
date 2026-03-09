@@ -10,7 +10,7 @@ requires only a single entry in that dict.
 
 Public API
 ----------
-compute_fft(x, y, window, zero_pad, normalize, output)
+compute_fft(x, y, window, zero_pad, normalize, output, keep_dc)
     Core computation; returns *(frequencies_hz, values)*.
 
 is_uniform(x, rtol)
@@ -100,7 +100,7 @@ def resample_uniform(x: np.ndarray, y: np.ndarray, num_points: int | None = None
     return x_uniform, y_uniform
 
 
-def compute_fft(x: np.ndarray, y: np.ndarray, window: WindowFunction = WindowFunction.RECTANGULAR, zero_pad: ZeroPadding = ZeroPadding.NONE, normalize: bool = False, output: FftOutput = FftOutput.MAGNITUDE) -> tuple[np.ndarray, np.ndarray]:
+def compute_fft(x: np.ndarray, y: np.ndarray, window: WindowFunction = WindowFunction.RECTANGULAR, zero_pad: ZeroPadding = ZeroPadding.NONE, normalize: bool = False, output: FftOutput = FftOutput.MAGNITUDE, keep_dc: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Compute the FFT of the real-valued signal *y* sampled at times *x*.
 
     Non-uniform sampling is detected automatically; when present, *y* is
@@ -115,6 +115,8 @@ def compute_fft(x: np.ndarray, y: np.ndarray, window: WindowFunction = WindowFun
     zero_pad  : zero-padding strategy (``NONE`` or ``NEXT_POWER_OF_TWO``).
     normalize : when *True*, scale so that the peak magnitude equals 1.
     output    : which quantity to return (magnitude, dB or phase).
+    keep_dc   : when *False* (default), the signal mean is subtracted before
+                windowing so the DC component is removed.
 
     Returns
     -------
@@ -147,6 +149,9 @@ def compute_fft(x: np.ndarray, y: np.ndarray, window: WindowFunction = WindowFun
         raise ValueError("time step dt must be positive")
     # number of input samples
     n = len(y)
+    # subtract mean to remove DC component when keep_dc is False
+    if not keep_dc:
+        y = y - float(np.mean(y))
     # apply window function
     win = WINDOW_REGISTRY[window](n)
     # apply window to the signal
