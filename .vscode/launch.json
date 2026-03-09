@@ -64,7 +64,7 @@
             "request": "launch",
             "module": "viewer",
             "console": "integratedTerminal",
-            "args": ["test.qraw", "--log-level=DEBUG"]
+            "args": ["--log-level=DEBUG"]
         }
     ]
 }

@@ -43,14 +43,16 @@ class FftDialog(QDialog):
         self._result_variable: Expression | None = None
         self._result_from_index: int = 0
         self._result_to_index: int = len(abscissa.values)
-        self._result_window: WindowFunction = WindowFunction.RECTANGULAR
+        self._result_window: WindowFunction = WindowFunction.HANNING
         self._result_zero_pad: ZeroPadding = ZeroPadding.NONE
         self._result_normalize: bool = False
+        self._result_keep_dc: bool = False
         self._result_output: FftOutput = FftOutput.MAGNITUDE
         # window setup
         self.setWindowTitle("FFT")
         self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.resize(480, 540)
+        self.resize(480, 650)
+        self.setMinimumHeight(650)
         # compute frequency-range preview from the full abscissa
         abscissa_values = abscissa.values
         df, f_nyquist = fft_frequency_range(abscissa_values)
@@ -67,6 +69,7 @@ class FftDialog(QDialog):
             "abscissaMax": float(abscissa_values[-1]),
             "zoomFromTime": float(abscissa_values[min(zoom_from_index, len(abscissa_values) - 1)]),
             "zoomToTime": float(abscissa_values[min(zoom_to_index, len(abscissa_values)) - 1]),
+            "defaultWindowIndex": [w.value for w in WindowFunction].index(WindowFunction.HANNING.value),
         }
         # create QML view
         self._qml_view = QQuickView()
@@ -93,8 +96,8 @@ class FftDialog(QDialog):
         root.dialogAccepted.connect(self._on_dialog_accepted)
         root.dialogRejected.connect(self.reject)
 
-    @Slot(str, str, str, str, bool, str, float, float)
-    def _on_dialog_accepted(self, variable_name: str, window_fn: str, zero_pad: str, output: str, normalize: bool, range_mode: str, custom_from: float, custom_to: float):
+    @Slot(str, str, str, str, bool, str, float, float, bool)
+    def _on_dialog_accepted(self, variable_name: str, window_fn: str, zero_pad: str, output: str, normalize: bool, range_mode: str, custom_from: float, custom_to: float, keep_dc: bool):
         # resolve variable by name against the stored list
         variable = next((v for v in self._variables if v.name == variable_name), None)
         if variable is None:
@@ -124,6 +127,8 @@ class FftDialog(QDialog):
             self._result_output = FftOutput.MAGNITUDE
         # normalize flag
         self._result_normalize = normalize
+        # keep dc flag
+        self._result_keep_dc = keep_dc
         # data range
         abscissa_values = self._abscissa.values
         # total number of abscissa samples
@@ -168,6 +173,10 @@ class FftDialog(QDialog):
     @property
     def result_normalize(self) -> bool:
         return self._result_normalize
+
+    @property
+    def result_keep_dc(self) -> bool:
+        return self._result_keep_dc
 
     @property
     def result_output(self) -> FftOutput:

@@ -353,13 +353,13 @@ class TestFft(TestCase):
         self.assertAlmostEqual(float(magnitude[peak_index]), 1.0, delta=0.05)
 
     def test_compute_fft_dc_amplitude_is_one_for_unit_dc_signal(self):
-        # arrange — a constant signal of amplitude 1; dc bin should give 1.0
+        # arrange — a constant signal of amplitude 1; dc bin should give 1.0 when DC is kept
         n = 512
         fs = 1000.0
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.ones(n)
-        # act
-        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        # act — keep_dc=True so the DC component is not subtracted before the FFT
+        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=True)
         # assert — DC bin (index 0) must equal 1.0
         self.assertAlmostEqual(float(magnitude[0]), 1.0, delta=0.001)
 
@@ -375,3 +375,25 @@ class TestFft(TestCase):
         _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
         # assert — last bin amplitude must be 1.0, not 2.0 (which a missing halving would give)
         self.assertAlmostEqual(float(magnitude[-1]), 1.0, delta=0.01)
+
+    def test_compute_fft_keep_dc_false_removes_dc_component(self):
+        # arrange — constant offset plus a sine; with DC removed the DC bin should be near zero
+        n = 512
+        fs = 1000.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = 5.0 + np.sin(2 * np.pi * 100.0 * x)
+        # act
+        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=False)
+        # assert — DC bin amplitude must be negligible after mean subtraction
+        self.assertLess(float(magnitude[0]), 0.01)
+
+    def test_compute_fft_keep_dc_true_preserves_dc_component(self):
+        # arrange — constant offset of 5 V with no AC content
+        n = 512
+        fs = 1000.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.full(n, 5.0)
+        # act
+        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=True)
+        # assert — DC bin must reflect the 5 V offset
+        self.assertAlmostEqual(float(magnitude[0]), 5.0, delta=0.01)

@@ -11,6 +11,7 @@ dependencies = [
     "numpy",
     "PySide6>=6.7",
     "jupyterlab",
+    "matplotlib",
 ]
 
 [project.scripts]
@@ -20,7 +21,7 @@ qspice-qraw-viewer = "viewer.__main__:main"
 include = ["viewer*"]
 
 [tool.setuptools.package-data]
-viewer = ["*.qml", "*.ui"]
+viewer = ["*.qml", "resources/*.svg", "resources/*.png", "resources/*.ico"]
 
 [tool.pyside6-project]
 files = ["main.py"]

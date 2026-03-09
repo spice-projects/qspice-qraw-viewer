@@ -18,12 +18,18 @@ Item {
     property real abscissaMax: 0
     property real zoomFromTime: 0
     property real zoomToTime: 0
+    property int defaultWindowIndex: 2
 
-    signal dialogAccepted(string variableName, string windowFn, string zeroPad, string output, bool normalize, string rangeMode, real customFrom, real customTo)
+    signal dialogAccepted(string variableName, string windowFn, string zeroPad, string output, bool normalize, string rangeMode, real customFrom, real customTo, bool keepDc)
     signal dialogRejected()
 
     // selected range mode: "all" | "zoom" | "custom"
     property string rangeMode: "all"
+    property var rangeOptions: [
+        { label: "All abscissa points", value: "all" },
+        { label: "Current zoom / visible range", value: "zoom" },
+        { label: "Custom time range", value: "custom" }
+    ]
 
     Rectangle {
         anchors.fill: parent
@@ -114,73 +120,51 @@ Item {
                 width: parent.width
                 spacing: 6
 
-                // "All points" option
                 Rectangle {
                     width: parent.width
                     height: 32
                     radius: 4
-                    color: root.rangeMode === "all" ? "#2a4a7a" : "#23252e"
-                    border.color: root.rangeMode === "all" ? "#5b9bd5" : "#3a3d4a"
+                    color: "#23252e"
+                    border.color: "#3a3d4a"
                     border.width: 1
 
-                    Text {
-                        anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 10 }
-                        text: "All abscissa points"
-                        color: root.rangeMode === "all" ? "#dce8f8" : "#b0b8c8"
-                        font.pixelSize: 12
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.rangeMode = "all"
+                    ComboBox {
+                        id: rangeCombo
+                        anchors { fill: parent; margins: 2 }
+                        model: root.rangeOptions
+                        textRole: "label"
+                        onCurrentIndexChanged: root.rangeMode = rangeCombo.currentIndex >= 0 ? root.rangeOptions[rangeCombo.currentIndex].value : "all"
+                        background: Rectangle { color: "transparent" }
+                        contentItem: Text {
+                            leftPadding: 8
+                            text: rangeCombo.displayText
+                            color: "#dce8f8"
+                            font.pixelSize: 12
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        delegate: ItemDelegate {
+                            id: rangeDelegate
+                            required property var modelData
+                            required property int index
+                            width: rangeCombo.width
+                            contentItem: Text {
+                                text: rangeDelegate.modelData.label
+                                color: "#b0b8c8"
+                                font.pixelSize: 12
+                            }
+                            background: Rectangle {
+                                color: rangeCombo.highlightedIndex === rangeDelegate.index ? "#3a3d4a" : "#252730"
+                            }
+                        }
+                        popup.background: Rectangle {
+                            color: "#252730"
+                            border.color: "#3a3d4a"
+                            border.width: 1
+                            radius: 4
+                        }
                     }
                 }
 
-                // "Current zoom" option
-                Rectangle {
-                    width: parent.width
-                    height: 32
-                    radius: 4
-                    color: root.rangeMode === "zoom" ? "#2a4a7a" : "#23252e"
-                    border.color: root.rangeMode === "zoom" ? "#5b9bd5" : "#3a3d4a"
-                    border.width: 1
-
-                    Text {
-                        anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 10 }
-                        text: "Current zoom / visible range"
-                        color: root.rangeMode === "zoom" ? "#dce8f8" : "#b0b8c8"
-                        font.pixelSize: 12
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.rangeMode = "zoom"
-                    }
-                }
-
-                // "Custom" option
-                Rectangle {
-                    width: parent.width
-                    height: 32
-                    radius: 4
-                    color: root.rangeMode === "custom" ? "#2a4a7a" : "#23252e"
-                    border.color: root.rangeMode === "custom" ? "#5b9bd5" : "#3a3d4a"
-                    border.width: 1
-
-                    Text {
-                        anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 10 }
-                        text: "Custom time range"
-                        color: root.rangeMode === "custom" ? "#dce8f8" : "#b0b8c8"
-                        font.pixelSize: 12
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.rangeMode = "custom"
-                    }
-                }
-
-                // Custom from/to fields — visible only when "custom" is selected
                 Row {
                     visible: root.rangeMode === "custom"
                     width: parent.width
@@ -257,6 +241,8 @@ Item {
                     id: windowCombo
                     anchors { fill: parent; margins: 2 }
                     model: root.windowFunctions
+                    currentIndex: root.defaultWindowIndex
+                    onModelChanged: currentIndex = root.defaultWindowIndex
                     background: Rectangle { color: "transparent" }
                     contentItem: Text {
                         leftPadding: 8
@@ -455,17 +441,57 @@ Item {
                 }
             }
 
+            // Keep DC component checkbox
+            Rectangle {
+                width: parent.width
+                height: 32
+                radius: 4
+                color: keepDcCheck.checked ? "#2a3a2a" : "#23252e"
+                border.color: keepDcCheck.checked ? "#4a9a4a" : "#3a3d4a"
+                border.width: 1
+
+                Row {
+                    anchors { fill: parent; leftMargin: 10 }
+                    spacing: 8
+
+                    CheckBox {
+                        id: keepDcCheck
+                        anchors.verticalCenter: parent.verticalCenter
+                        checked: false
+                        indicator: Rectangle {
+                            width: 16; height: 16
+                            radius: 3
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: keepDcCheck.checked ? "#4a9a4a" : "#23252e"
+                            border.color: keepDcCheck.checked ? "#4a9a4a" : "#5a6070"
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "✓"
+                                color: "#ffffff"
+                                font.pixelSize: 11
+                                visible: keepDcCheck.checked
+                            }
+                        }
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Keep DC component"
+                        color: "#b0b8c8"
+                        font.pixelSize: 12
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: keepDcCheck.checked = !keepDcCheck.checked
+                }
+            }
+
             // ---------------------------------------------------------------
             // Section: Preview
             // ---------------------------------------------------------------
-            Text {
-                text: "Output Preview"
-                color: "#7a8599"
-                font.pixelSize: 11
-                font.capitalization: Font.AllUppercase
-                leftPadding: 2
-            }
-
             Rectangle {
                 width: parent.width
                 implicitHeight: previewColumn.implicitHeight + 16
@@ -561,7 +587,8 @@ Item {
                         var norm = normalizeCheck.checked
                         var from = parseFloat(fromField.text)
                         var to = parseFloat(toField.text)
-                        root.dialogAccepted(varName, winFn, zp, out, norm, root.rangeMode, from, to)
+                        var keepDc = keepDcCheck.checked
+                        root.dialogAccepted(varName, winFn, zp, out, norm, root.rangeMode, from, to, keepDc)
                     }
                 }
             }

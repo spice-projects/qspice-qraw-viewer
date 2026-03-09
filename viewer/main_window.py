@@ -3,9 +3,9 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
-from PySide6.QtGui import QAction, QColor, QGuiApplication, QKeySequence
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QKeySequence
 from PySide6.QtQuick import QQuickView
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
+from PySide6.QtWidgets import QMainWindow, QWidget
 
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
@@ -19,6 +19,13 @@ from .qraw_file import AbscissaScale, QRawFile
 logger = logging.getLogger(__name__)
 
 _QML_FILE = Path(__file__).parent / "main_window.qml"
+_RESOURCE_DIR = Path(__file__).parent / "resources"
+_ICON_PATH = _RESOURCE_DIR / "waveform-window-icon.ico"
+
+
+def load_app_icon() -> QIcon:
+    return QIcon(str(_ICON_PATH))
+
 
 # background color matching the chart dark theme
 _BG = "#1a1b1e"
@@ -74,16 +81,21 @@ def _format_values(name: str, values: list[float], unit: str) -> str:
 
 class MainWindow(QMainWindow):
 
-    def __init__(self, qraw_file: QRawFile):
+    def __init__(self, qraw_file: QRawFile, source_qraw_path: Path | None = None):
         super().__init__()
+        icon = load_app_icon()
+        if not icon.isNull():
+            self.setWindowIcon(icon)
         # extract information from file
         self._abscissa = qraw_file.abscissa
         self._abscissa_scale = qraw_file.abscissa_scale
         self._expression_manager = qraw_file.expression_manager
         self._steps = qraw_file.steps
         self._plot_suggestions = qraw_file.get_plot_suggestions()
-        # store the simulation file path for use by the Jupyter integration
-        self._qraw_path = qraw_file.filename
+        # store the simulation file path for use by the Jupyter integration;
+        # source_qraw_path overrides when this window displays a derived result (e.g. FFT)
+        # so Jupyter always opens the original .qraw file
+        self._qraw_path = source_qraw_path if source_qraw_path is not None else qraw_file.filename
         # set window title to include the loaded filename
         self.setWindowTitle(f"QSPICE - {qraw_file.filename.name}")
         # apply dark background stylesheet to the window chrome
@@ -147,12 +159,6 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu("&File")
-        # File | Open
-        open_action = QAction("&Open...", self)
-        open_action.setShortcut(QKeySequence.Open)
-        open_action.triggered.connect(self._on_file_open)
-        file_menu.addAction(open_action)
-        file_menu.addSeparator()
         # File | Quit
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence.Quit)
@@ -161,8 +167,8 @@ class MainWindow(QMainWindow):
 
         # Tools menu
         tools_menu = menu_bar.addMenu("&Tools")
-        # Tools | Open Jupyter
-        jupyter_action = QAction("Open Jupyter...", self)
+        # Tools | Open in JupyterLab
+        jupyter_action = QAction("Open in JupyterLab...", self)
         jupyter_action.triggered.connect(self._on_open_jupyter)
         tools_menu.addAction(jupyter_action)
 
@@ -187,22 +193,8 @@ class MainWindow(QMainWindow):
         # keep a reference to prevent the window from being garbage collected
         self._jupyter_windows.append(window)
         # show a status bar message while the server starts; clear it when the window appears
-        self.statusBar().showMessage("Starting JupyterLab…")
         window.ready.connect(lambda: self.statusBar().clearMessage())
         # window.show() is intentionally absent — JupyterWindow shows itself when fully loaded
-
-    def _on_file_open(self):
-        # native file dialog to pick a QRAW file
-        filename, _ = QFileDialog.getOpenFileName(self, "Open QRAW File", "", "QRAW Files (*.qraw);;All Files (*)")
-        if not filename:
-            return
-        # parse qraw file
-        new_file = QRawFile.load(filename)
-        if new_file is None:
-            # log information
-            logger.error("Failed to load selected QRAW file: %s", filename)
-            # exit
-            return
 
     def _populate_charts(self):
         # fall back to one empty chart when there are none
@@ -392,6 +384,7 @@ class MainWindow(QMainWindow):
         window = dialog.result_window
         zero_pad = dialog.result_zero_pad
         normalize = dialog.result_normalize
+        keep_dc = dialog.result_keep_dc
         output = dialog.result_output
         # number of samples per step (abscissa is already trimmed to one period)
         step_points = len(self._abscissa.data)
@@ -400,7 +393,7 @@ class MainWindow(QMainWindow):
         y = expression.values[0:step_points][from_index:to_index]
         try:
             # compute FFT using numpy
-            frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output)
+            frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output, keep_dc)
         except ValueError:
             # log exception and abort when computation fails
             logger.exception("FFT computation failed for expression '%s'", expression.name)
@@ -422,8 +415,9 @@ class MainWindow(QMainWindow):
         expression_manager = ExpressionManager([freq_expression, fft_expression])
         # create a synthetic QRawFile with frequency abscissa and FFT values
         fft_qraw = QRawFile(filename=Path(f"fft_{expression.name}.qraw"), title=f"FFT – {expression.name}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=f"\xab{fft_expression_name}\xbb", expression_manager=expression_manager)
-        # create a new MainWindow to render the FFT result using the existing infrastructure
-        fft_window = MainWindow(fft_qraw)
+        # create a new MainWindow to render the FFT result using the existing infrastructure;
+        # pass the original source path so Jupyter always opens the correct .qraw file
+        fft_window = MainWindow(fft_qraw, source_qraw_path=self._qraw_path)
         # keep reference alive to prevent garbage collection
         self._fft_windows.append(fft_window)
         # show the FFT result window
