@@ -397,6 +397,7 @@ class MainWindow(QMainWindow):
         except ValueError:
             # log exception and abort when computation fails
             logger.exception("FFT computation failed for expression '%s'", expression.name)
+            # exit
             return
         # determine unit based on FFT output type
         fft_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else "V")
@@ -404,6 +405,7 @@ class MainWindow(QMainWindow):
         if len(frequencies) == 0:
             # log error and abort
             logger.error("FFT computation returned empty result for expression '%s'", expression.name)
+            # exit
             return
         # name for the FFT result expression
         fft_expression_name = f"FFT({expression.name})"

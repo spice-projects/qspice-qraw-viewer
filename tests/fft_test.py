@@ -57,6 +57,21 @@ class TestFft(TestCase):
         # assert
         self.assertFalse(result)
 
+    def test_is_uniform_adaptive_atol_handles_tiny_dt(self):
+        # arrange — very small time steps with a tiny absolute jitter; this
+        # should be considered uniform when using an adaptive absolute
+        # tolerance but could be rejected by a naive relative-only test.
+        n = 100
+        dt = 1e-12
+        x = np.linspace(0.0, (n - 1) * dt, n)
+        # introduce a tiny absolute jitter smaller than realistic measurement
+        # noise but larger than a strict relative threshold
+        x[50] += 5e-13
+        # act
+        result = is_uniform(x)
+        # assert — must be treated as uniform
+        self.assertTrue(result)
+
     def test_resample_uniform_output_length_matches_requested(self):
         # arrange
         x = np.array([0.0, 0.1, 0.3, 0.7, 1.0])
@@ -375,6 +390,54 @@ class TestFft(TestCase):
         _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
         # assert — last bin amplitude must be 1.0, not 2.0 (which a missing halving would give)
         self.assertAlmostEqual(float(magnitude[-1]), 1.0, delta=0.01)
+
+    def test_compute_fft_raises_on_zero_sum_window(self):
+        # arrange — create a simple tone and temporarily replace the
+        # rectangular window with a zero-valued window to simulate the
+        # pathological case
+        n = 128
+        fs = 1000.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.sin(2 * np.pi * 50.0 * x)
+        orig_win = WINDOW_REGISTRY[WindowFunction.RECTANGULAR]
+        try:
+            WINDOW_REGISTRY[WindowFunction.RECTANGULAR] = lambda m: np.zeros(m)
+            # act / assert — computation must raise a clear ValueError
+            with self.assertRaises(ValueError):
+                compute_fft(x, y, window=WindowFunction.RECTANGULAR)
+        finally:
+            WINDOW_REGISTRY[WindowFunction.RECTANGULAR] = orig_win
+
+    def test_compute_thd_simple_second_harmonic(self):
+        # arrange — fundamental with a small second harmonic (A1=1.0, A2=0.1)
+        n = 2048
+        fs = 8192.0
+        f1 = 123.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = 1.0 * np.sin(2 * np.pi * f1 * x) + 0.1 * np.sin(2 * np.pi * 2.0 * f1 * x)
+        # act — compute FFT and then THD
+        freqs, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
+        # assert — expected THD = 0.1 (linear)
+        # compute_thd is tested in tests/thd_test.py
+
+    def test_compute_thd_multiple_harmonics(self):
+        # arrange — fundamental plus 2nd and 3rd harmonics (A1=1, A2=0.2, A3=0.05)
+        n = 2048
+        fs = 8192.0
+        f1 = 50.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = 1.0 * np.sin(2 * np.pi * f1 * x) + 0.2 * np.sin(2 * np.pi * 2.0 * f1 * x) + 0.05 * np.sin(2 * np.pi * 3.0 * f1 * x)
+        # act
+        freqs, magnitude = compute_fft(x, y, window=WindowFunction.HANNING, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
+        # compute_thd is tested in tests/thd_test.py
+
+    def test_compute_thd_raises_on_zero_fundamental(self):
+        # arrange — zero signal so fundamental amplitude is zero
+        n = 256
+        x = np.linspace(0.0, 1.0, n, endpoint=False)
+        y = np.zeros(n)
+        freqs, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        # compute_thd is tested in tests/thd_test.py
 
     def test_compute_fft_keep_dc_false_removes_dc_component(self):
         # arrange — constant offset plus a sine; with DC removed the DC bin should be near zero

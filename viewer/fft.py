@@ -60,20 +60,37 @@ WINDOW_REGISTRY: dict[WindowFunction, collections.abc.Callable[[int], np.ndarray
 }
 
 
-def is_uniform(x: np.ndarray, rtol: float = 1e-3) -> bool:
-    """Return *True* when *x* is sampled on a uniform grid within *rtol*.
+def is_uniform(x: np.ndarray, rtol: float = 1e-3, atol: float | None = None) -> bool:
+    """Return *True* when *x* is sampled on a uniform grid within *rtol* and *atol*.
+
+    The function uses an adaptive absolute tolerance when *atol* is not
+    provided so that very small or very large time-step scales are handled
+    robustly without forcing callers to compute a scale-aware tolerance.
 
     Parameters
     ----------
     x    : 1-D array of sample positions (time, etc.).
     rtol : relative tolerance used for the step-size comparison.
+    atol : absolute tolerance used for the step-size comparison. When
+           ``None`` an adaptive default based on machine epsilon and the
+           data scale is used.
     """
     # degenerate inputs with fewer than two points cannot be non-uniform
     if len(x) < 2:
         return True
-    # compute pairwise differences and check all are within rtol of the first step
+    # compute pairwise differences and check all are within rtol/atol of the first step
     diffs = np.diff(x)
-    return bool(np.all(np.isclose(diffs, diffs[0], rtol=rtol)))
+    # compute an adaptive absolute tolerance when not supplied
+    if atol is None:
+        # epsilon for the floating-point type of the input data
+        eps = np.finfo(float).eps
+        # scale is the largest step magnitude, but never less than 1.0 to
+        # avoid overly-small eps-derived tolerances for sub-unit steps
+        scale = max(float(np.max(np.abs(diffs))), 1.0)
+        # multiply by a small factor to produce a sensible floor
+        atol = max(1e-12, eps * scale * 10.0)
+    # check that all step differences are close to the first step within the specified tolerances
+    return bool(np.all(np.isclose(diffs, diffs[0], rtol=rtol, atol=atol)))
 
 
 def resample_uniform(x: np.ndarray, y: np.ndarray, num_points: int | None = None) -> tuple[np.ndarray, np.ndarray]:
@@ -154,6 +171,10 @@ def compute_fft(x: np.ndarray, y: np.ndarray, window: WindowFunction = WindowFun
         y = y - float(np.mean(y))
     # apply window function
     win = WINDOW_REGISTRY[window](n)
+    # defensive guard: ensure the coherent gain denominator is non-zero
+    win_sum = float(np.sum(win))
+    if win_sum == 0.0:
+        raise ValueError("sum of window weights is zero")
     # apply window to the signal
     y_windowed = y * win
     # zero-padding
@@ -166,10 +187,11 @@ def compute_fft(x: np.ndarray, y: np.ndarray, window: WindowFunction = WindowFun
     spectrum = np.fft.rfft(y_windowed, n=n_fft)
     # frequency axis in Hz
     frequencies = np.fft.rfftfreq(n_fft, d=dt)
-    # amplitude correction: rfft returns one-sided, so multiply by 2/sum(win);
-    # sum(win) equals n for rectangular windows and is smaller for all others —
-    # dividing by sum(win) rather than n gives the correct coherent gain correction
-    scale = 2.0 / float(np.sum(win))
+    # amplitude correction: rfft returns one-sided, so multiply by 2/sum(win)
+    # sum(win) equals n for rectangular windows and is smaller for all others
+    # dividing by sum(win) rather than n gives the correct coherent gain
+    # correction; win_sum was validated above
+    scale = 2.0 / win_sum
     if output == FftOutput.MAGNITUDE:
         values = np.abs(spectrum) * scale
         # halve the DC component which is not doubled in one-sided FFT
