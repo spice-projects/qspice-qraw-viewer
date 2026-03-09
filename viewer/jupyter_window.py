@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import shutil
 import socket
 import sys
 from pathlib import Path
@@ -85,8 +86,16 @@ class JupyterWindow(QMainWindow):
         self._start_jupyter()
 
     def _start_jupyter(self) -> None:
-        # resolve the jupyter executable from the same venv as the running interpreter
-        jupyter_exe = str(Path(sys.executable).parent / "jupyter")
+        # resolve the jupyter executable from the interpreter's directory
+        jupyter_exe = shutil.which("jupyter", path=str(Path(sys.executable).parent))
+        # fall back to the system PATH
+        if not jupyter_exe:
+            jupyter_exe = shutil.which("jupyter")
+        if not jupyter_exe:
+            # log error
+            logger.error("jupyter executable not found")
+            # exit
+            return
         # notebook-dir is set to the user home so the file browser covers the full home tree
         args = [
             "lab",

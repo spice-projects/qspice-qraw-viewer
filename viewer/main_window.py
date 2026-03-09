@@ -3,9 +3,9 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
-from PySide6.QtGui import QAction, QColor, QGuiApplication, QKeySequence
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QKeySequence
 from PySide6.QtQuick import QQuickView
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
+from PySide6.QtWidgets import QMainWindow, QWidget
 
 from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
@@ -19,6 +19,13 @@ from .qraw_file import AbscissaScale, QRawFile
 logger = logging.getLogger(__name__)
 
 _QML_FILE = Path(__file__).parent / "main_window.qml"
+_RESOURCE_DIR = Path(__file__).parent / "resources"
+_ICON_PATH = _RESOURCE_DIR / "waveform-window-icon.ico"
+
+
+def load_app_icon() -> QIcon:
+    return QIcon(str(_ICON_PATH))
+
 
 # background color matching the chart dark theme
 _BG = "#1a1b1e"
@@ -76,6 +83,9 @@ class MainWindow(QMainWindow):
 
     def __init__(self, qraw_file: QRawFile):
         super().__init__()
+        icon = load_app_icon()
+        if not icon.isNull():
+            self.setWindowIcon(icon)
         # extract information from file
         self._abscissa = qraw_file.abscissa
         self._abscissa_scale = qraw_file.abscissa_scale
@@ -147,12 +157,6 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu("&File")
-        # File | Open
-        open_action = QAction("&Open...", self)
-        open_action.setShortcut(QKeySequence.Open)
-        open_action.triggered.connect(self._on_file_open)
-        file_menu.addAction(open_action)
-        file_menu.addSeparator()
         # File | Quit
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence.Quit)
@@ -161,8 +165,8 @@ class MainWindow(QMainWindow):
 
         # Tools menu
         tools_menu = menu_bar.addMenu("&Tools")
-        # Tools | Open Jupyter
-        jupyter_action = QAction("Open Jupyter...", self)
+        # Tools | Open in JupyterLab
+        jupyter_action = QAction("Open in JupyterLab...", self)
         jupyter_action.triggered.connect(self._on_open_jupyter)
         tools_menu.addAction(jupyter_action)
 
@@ -187,22 +191,8 @@ class MainWindow(QMainWindow):
         # keep a reference to prevent the window from being garbage collected
         self._jupyter_windows.append(window)
         # show a status bar message while the server starts; clear it when the window appears
-        self.statusBar().showMessage("Starting JupyterLab…")
         window.ready.connect(lambda: self.statusBar().clearMessage())
         # window.show() is intentionally absent — JupyterWindow shows itself when fully loaded
-
-    def _on_file_open(self):
-        # native file dialog to pick a QRAW file
-        filename, _ = QFileDialog.getOpenFileName(self, "Open QRAW File", "", "QRAW Files (*.qraw);;All Files (*)")
-        if not filename:
-            return
-        # parse qraw file
-        new_file = QRawFile.load(filename)
-        if new_file is None:
-            # log information
-            logger.error("Failed to load selected QRAW file: %s", filename)
-            # exit
-            return
 
     def _populate_charts(self):
         # fall back to one empty chart when there are none

@@ -64,6 +64,7 @@ def _make_notebook(qraw_path: Path) -> dict:
                     "import sys\n",
                     "import numpy as np\n",
                     "import matplotlib.pyplot as plt\n",
+                    "\n",
                     "# ensure the live project source takes priority over any installed copy\n",
                     f"_project_root = {str(_PROJECT_ROOT)!r}\n",
                     "if _project_root not in sys.path:\n",
@@ -71,11 +72,11 @@ def _make_notebook(qraw_path: Path) -> dict:
                     "from viewer.qraw_file import QRawFile\n",
                     "\n",
                     f"qraw = QRawFile.load({path_str!r})\n",
+                    "\n",
                     "print(f'File   : {qraw.filename.name}')\n",
                     "print(f'Type   : {qraw.plotname}')\n",
                     "print(f'Steps  : {qraw.steps}')\n",
-                    "print(f'X-axis : {qraw.abscissa.name} ({qraw.abscissa.unit}),"
-                    " {len(qraw.abscissa.data)} points')",
+                    "print(f'X-axis : {qraw.abscissa.name} ({qraw.abscissa.unit}), {len(qraw.abscissa.data)} points')",
                 ],
             },
             {
@@ -99,6 +100,7 @@ def _make_notebook(qraw_path: Path) -> dict:
                 "source": [
                     "# example: plot a signal\n",
                     "# replace 'V(out)' with any name from the list above\n",
+                    "\n",
                     "# expr = qraw.expression_manager.evaluate('V(out)')\n",
                     "# plt.figure()\n",
                     "# plt.plot(qraw.abscissa.data, np.real(expr.data))\n",
