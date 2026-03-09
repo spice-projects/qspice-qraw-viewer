@@ -28,11 +28,12 @@ def _make_dialog(abscissa_values=None, zoom_from=0, zoom_to=10):
     e1 = Expression("V(R1)", np.ones(len(abscissa_values)), "V")
     e2 = Expression("I(L1)", np.ones(len(abscissa_values)) * 2.0, "A")
     dialog = FftDialog.__new__(FftDialog)
-    dialog._variables = [e1, e2]
+    dialog._expressions = [e1, e2]
     dialog._abscissa = abscissa
     dialog._zoom_from_index = zoom_from
     dialog._zoom_to_index = zoom_to
-    dialog._result_variable = None
+    dialog._selected_expressions = {e1, e2}
+    dialog._result_expressions = []
     dialog._result_from_index = 0
     dialog._result_to_index = len(abscissa_values)
     dialog._result_window = WindowFunction.RECTANGULAR
@@ -49,29 +50,54 @@ def _make_dialog(abscissa_values=None, zoom_from=0, zoom_to=10):
 
 class TestFftDialogOnDialogAccepted(TestCase):
 
-    def test_unknown_variable_calls_reject(self):
-        # arrange
+    def test_no_selection_calls_reject(self):
+        # arrange — clear all pre-selected expressions so the dialog has nothing to compute
         dialog, _e1, _e2 = _make_dialog()
-        # act — pass a name that does not match any variable
-        dialog._on_dialog_accepted("NoSuchVar", "Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._selected_expressions = set()
+        # act
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(len(dialog._rejected_calls), 1)
-        self.assertIsNone(dialog._result_variable)
+        self.assertEqual(dialog._result_expressions, [])
 
-    def test_known_variable_stored_and_accepted(self):
+    def test_on_expression_selection_changed_adds_expression(self):
+        # arrange
+        dialog, e1, _e2 = _make_dialog()
+        dialog._selected_expressions = set()
+        # act
+        dialog._on_expression_selection_changed("V(R1)", True)
+        # assert
+        self.assertIn(e1, dialog._selected_expressions)
+
+    def test_on_expression_selection_changed_removes_expression(self):
         # arrange
         dialog, e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._on_expression_selection_changed("V(R1)", False)
         # assert
-        self.assertIs(dialog._result_variable, e1)
+        self.assertNotIn(e1, dialog._selected_expressions)
+
+    def test_on_expression_selection_changed_unknown_name_no_error(self):
+        # arrange
+        dialog, _e1, _e2 = _make_dialog()
+        # act / assert — unknown name must not raise
+        dialog._on_expression_selection_changed("NonExistentVar", True)
+
+    def test_known_variable_stored_and_accepted(self):
+        # arrange — both expressions are pre-selected by default
+        dialog, e1, e2 = _make_dialog()
+        # act
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+        # assert
+        self.assertIn(e1, dialog._result_expressions)
+        self.assertIn(e2, dialog._result_expressions)
         self.assertEqual(len(dialog._accepted_calls), 1)
 
     def test_window_function_hamming_stored(self):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Hamming", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Hamming", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_window, WindowFunction.HAMMING)
 
@@ -79,7 +105,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "???", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("???", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_window, WindowFunction.RECTANGULAR)
 
@@ -87,7 +113,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act — value string must match the enum definition exactly (capital P and T)
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "Next Power of Two", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "Next Power of Two", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_zero_pad, ZeroPadding.NEXT_POWER_OF_TWO)
 
@@ -95,7 +121,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "???", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "???", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_zero_pad, ZeroPadding.NONE)
 
@@ -103,7 +129,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude (dB)", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude (dB)", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_output, FftOutput.MAGNITUDE_DB)
 
@@ -111,7 +137,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Phase", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Phase", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_output, FftOutput.PHASE)
 
@@ -119,7 +145,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "???", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "???", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_output, FftOutput.MAGNITUDE)
 
@@ -127,7 +153,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", True, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", True, "full", 0.0, 1.0, False)
         # assert
         self.assertTrue(dialog._result_normalize)
 
@@ -135,7 +161,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
         self.assertFalse(dialog._result_normalize)
 
@@ -143,7 +169,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange — 11-point abscissa
         dialog, _e1, _e2 = _make_dialog(np.linspace(0.0, 1.0, 11))
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_from_index, 0)
         self.assertEqual(dialog._result_to_index, 11)
@@ -152,7 +178,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange — zoom window [3, 8)
         dialog, _e1, _e2 = _make_dialog(np.linspace(0.0, 1.0, 11), zoom_from=3, zoom_to=8)
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "zoom", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "zoom", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_from_index, 3)
         self.assertEqual(dialog._result_to_index, 8)
@@ -162,7 +188,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         abscissa = np.linspace(0.0, 1.0, 11)
         dialog, _e1, _e2 = _make_dialog(abscissa)
         # act — request range 0.2 s … 0.8 s (avoid 0.6 which has floating-point representability issues)
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "custom", 0.2, 0.8, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.2, 0.8, False)
         # assert — from_index=2 for 0.2; to_index verified against actual searchsorted output
         self.assertEqual(dialog._result_from_index, 2)
         # searchsorted(arr, 0.8, side='right') where arr[8]=0.8 → position 9
@@ -175,7 +201,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         abscissa = np.linspace(0.0, 1.0, 11)
         dialog, _e1, _e2 = _make_dialog(abscissa)
         # act — to_time beyond the end of the array
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "custom", 0.5, 999.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.5, 999.0, False)
         # assert — to_index clamped to total (11)
         self.assertEqual(dialog._result_to_index, 11)
 
@@ -184,7 +210,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         abscissa = np.linspace(0.0, 1.0, 11)
         dialog, _e1, _e2 = _make_dialog(abscissa)
         # act — from_time and to_time both map to index 5
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "custom", 0.5, 0.5, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.5, 0.5, False)
         # assert — at least 2 samples guaranteed
         self.assertGreaterEqual(dialog._result_to_index - dialog._result_from_index, 2)
 
@@ -192,7 +218,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog(np.linspace(0.0, 1.0, 11))
         # act — unrecognised range_mode triggers full-range fallback
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "unknown_mode", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "unknown_mode", 0.0, 1.0, False)
         # assert
         self.assertEqual(dialog._result_from_index, 0)
         self.assertEqual(dialog._result_to_index, 11)
@@ -201,7 +227,7 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, True)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, True)
         # assert
         self.assertTrue(dialog._result_keep_dc)
 
@@ -209,25 +235,25 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
         self.assertFalse(dialog._result_keep_dc)
 
 
 class TestFftDialogResultProperties(TestCase):
 
-    def test_result_variable_property_default_is_none(self):
+    def test_result_expressions_property_default_is_empty_list(self):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
         # act / assert
-        self.assertIsNone(dialog.result_variable)
+        self.assertEqual(dialog.result_expressions, [])
 
-    def test_result_variable_property_after_accept(self):
-        # arrange
-        dialog, e1, _e2 = _make_dialog()
-        dialog._on_dialog_accepted("V(R1)", "Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
+    def test_result_expressions_property_after_accept(self):
+        # arrange — both expressions are pre-selected; verify both appear in result
+        dialog, e1, e2 = _make_dialog()
+        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # act / assert
-        self.assertIs(dialog.result_variable, e1)
+        self.assertEqual(dialog.result_expressions, [e1, e2])
 
     def test_result_from_index_property(self):
         # arrange

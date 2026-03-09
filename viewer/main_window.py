@@ -378,7 +378,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() != FftDialog.DialogCode.Accepted:
             return
         # retrieve user selections
-        expression = dialog.result_variable
+        result_expressions = dialog.result_expressions
         from_index = dialog.result_from_index
         to_index = dialog.result_to_index
         window = dialog.result_window
@@ -386,37 +386,40 @@ class MainWindow(QMainWindow):
         normalize = dialog.result_normalize
         keep_dc = dialog.result_keep_dc
         output = dialog.result_output
-        # number of samples per step (abscissa is already trimmed to one period)
-        step_points = len(self._abscissa.data)
-        # extract the step-0 data slice within the user-selected range
-        x = self._abscissa.values[from_index:to_index]
-        y = expression.values[0:step_points][from_index:to_index]
-        try:
-            # compute FFT using numpy
-            frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output, keep_dc)
-        except ValueError:
-            # log exception and abort when computation fails
-            logger.exception("FFT computation failed for expression '%s'", expression.name)
-            # exit
-            return
         # determine unit based on FFT output type
         fft_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else "V")
-        # guard against an unexpectedly empty result (compute_fft guarantees non-empty on success)
-        if len(frequencies) == 0:
-            # log error and abort
-            logger.error("FFT computation returned empty result for expression '%s'", expression.name)
-            # exit
+        # number of samples per step (abscissa is already trimmed to one period)
+        step_points = len(self._abscissa.data)
+        # shared abscissa slice for all selected expressions
+        x = self._abscissa.values[from_index:to_index]
+        # compute FFT for each selected expression and accumulate results
+        fft_expressions: list[Expression] = []
+        frequencies = None
+        for expression in result_expressions:
+            y = expression.values[0:step_points][from_index:to_index]
+            try:
+                frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output, keep_dc)
+            except ValueError:
+                # log exception and skip this expression; continue with the remaining ones
+                logger.exception("FFT computation failed for expression '%s'", expression.name)
+                continue
+            # guard against an unexpectedly empty result
+            if len(frequencies) == 0:
+                logger.error("FFT computation returned empty result for expression '%s'", expression.name)
+                continue
+            fft_expressions.append(Expression(f"FFT({expression.name})", fft_values, fft_unit))
+        # abort if no expression produced a valid result
+        if not fft_expressions:
+            logger.error("All FFT computations failed; no results to display")
             return
-        # name for the FFT result expression
-        fft_expression_name = f"FFT({expression.name})"
-        # create frequency expression for the abscissa
+        # create frequency expression for the shared abscissa
         freq_expression = Expression("Frequency", frequencies, "Hz")
-        # create FFT result expression
-        fft_expression = Expression(fft_expression_name, fft_values, fft_unit)
-        # build expression manager with both expressions so plot suggestions work
-        expression_manager = ExpressionManager([freq_expression, fft_expression])
-        # create a synthetic QRawFile with frequency abscissa and FFT values
-        fft_qraw = QRawFile(filename=Path(f"fft_{expression.name}.qraw"), title=f"FFT – {expression.name}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=f"\xab{fft_expression_name}\xbb", expression_manager=expression_manager)
+        # build expression manager with frequency abscissa and all FFT results
+        expression_manager = ExpressionManager([freq_expression] + fft_expressions)
+        # build one «name» group per FFT expression so each gets its own chart
+        plot_suggestion = " ".join(f"\xab{e.name}\xbb" for e in fft_expressions)
+        # create a synthetic QRawFile with frequency abscissa and all FFT values
+        fft_qraw = QRawFile(filename=Path(f"fft_{result_expressions[0].name}.qraw"), title=f"FFT \u2013 {', '.join(e.name for e in result_expressions)}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=plot_suggestion, expression_manager=expression_manager)
         # create a new MainWindow to render the FFT result using the existing infrastructure;
         # pass the original source path so Jupyter always opens the correct .qraw file
         fft_window = MainWindow(fft_qraw, source_qraw_path=self._qraw_path)
