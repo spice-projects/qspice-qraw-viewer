@@ -24,20 +24,39 @@ pip install -r requirements.txt
 
 ## Install from GitHub
 
-Install directly from the repository via pip (replace `<GITHUB_URL>` with the repo HTTPS URL):
+Install latest version directly from GitHub repository:
 
 ```bash
 pip install git+https://github.com/spice-projects/qspice-qraw-viewer.git
 ```
 
-If you plan to develop or run the UI locally, create a virtualenv and install editable plus dev dependencies:
+After installation you can execute the application:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+qspice-qraw-viewer
 ```
+
+Note: ensure the directory containing pip-installed console scripts is on your `PATH` so the `qspice-qraw-viewer` command is discoverable. To locate the scripts directory programmatically use:
+
+```bash
+python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+```
+
+Examples:
+
+- Unix-like systems (common user installs): `$HOME/.local/bin` — add with:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+- Windows (example locations): `%APPDATA%\Python\Python312\Scripts` or the `Scripts` folder under your Python installation (e.g. `C:\Program Files\Python312\Scripts`). To make a scripts directory discoverable in the current PowerShell session:
+
+```powershell
+$env:PATH = "$env:PATH;C:\Path\To\Scripts"
+```
+
+Adjust the concrete path according to the output of the `python -c ...` command above.
 
 ## Quick usage
 
