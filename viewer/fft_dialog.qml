@@ -8,7 +8,6 @@ Item {
     anchors.fill: parent
 
     // context properties injected by Python
-    property var variableNames: []
     property var windowFunctions: []
     property var outputTypes: []
     property var zeroPaddingOptions: []
@@ -20,8 +19,30 @@ Item {
     property real zoomToTime: 0
     property int defaultWindowIndex: 2
 
-    signal dialogAccepted(string variableName, string windowFn, string zeroPad, string output, bool normalize, string rangeMode, real customFrom, real customTo, bool keepDc)
+    // expression multi-select state
+    property var expressionItems: []
+    property var selectionState: ({})
+    property string filterText: ""
+    readonly property var filteredItems: {
+        var text = filterText.toLowerCase()
+        if (text === "") return root.expressionItems
+        return root.expressionItems.filter(function(e) {
+            return String(e[0]).toLowerCase().indexOf(text) !== -1
+        })
+    }
+
+    function initializeExpressions(items) {
+        root.expressionItems = items
+        var state = {}
+        for (var i = 0; i < items.length; i++) {
+            state[items[i][0]] = items[i][1]
+        }
+        root.selectionState = state
+    }
+
+    signal dialogAccepted(string windowFn, string zeroPad, string output, bool normalize, string rangeMode, real customFrom, real customTo, bool keepDc)
     signal dialogRejected()
+    signal selectionChanged(string expressionName, bool selected)
 
     // selected range mode: "all" | "zoom" | "custom"
     property string rangeMode: "all"
@@ -52,55 +73,108 @@ Item {
             spacing: 14
 
             // ---------------------------------------------------------------
-            // Section: Variable
+            // Section: Expressions
             // ---------------------------------------------------------------
             Text {
-                text: "Variable"
+                text: "Expressions"
                 color: "#7a8599"
                 font.pixelSize: 11
                 font.capitalization: Font.AllUppercase
                 leftPadding: 2
             }
 
+            // filter input bar
             Rectangle {
+                id: exprFilterBar
                 width: parent.width
-                height: 32
+                height: 28
                 radius: 4
                 color: "#23252e"
-                border.color: "#3a3d4a"
+                border.color: exprFilterInput.activeFocus ? "#5b9bd5" : "#3a3d4a"
                 border.width: 1
 
-                ComboBox {
-                    id: variableCombo
-                    anchors { fill: parent; margins: 2 }
-                    model: root.variableNames
-                    background: Rectangle { color: "transparent" }
-                    contentItem: Text {
-                        leftPadding: 8
-                        text: variableCombo.displayText
-                        color: "#dce8f8"
+                TextInput {
+                    id: exprFilterInput
+                    anchors { verticalCenter: parent.verticalCenter; left: parent.left; right: exprClearBtn.left; leftMargin: 8; rightMargin: 4 }
+                    color: "#dce8f8"
+                    font.pixelSize: 12
+                    clip: true
+                    onTextChanged: root.filterText = exprFilterInput.text
+                    Text {
+                        anchors.fill: parent
+                        text: "Filter expressions..."
+                        color: "#555b6a"
                         font.pixelSize: 12
-                        verticalAlignment: Text.AlignVCenter
+                        visible: exprFilterInput.text === ""
                     }
-                    delegate: ItemDelegate {
-                        id: variableDelegate
-                        required property string modelData
-                        required property int index
-                        width: variableCombo.width
-                        contentItem: Text {
-                            text: variableDelegate.modelData
-                            color: "#b0b8c8"
-                            font.pixelSize: 12
-                        }
-                        background: Rectangle {
-                            color: variableCombo.highlightedIndex === variableDelegate.index ? "#3a3d4a" : "#252730"
-                        }
+                }
+
+                Rectangle {
+                    id: exprClearBtn
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 6 }
+                    width: 16; height: 16
+                    radius: 8
+                    color: exprClearMouse.containsMouse ? "#3a3d4a" : "transparent"
+                    visible: exprFilterInput.text !== ""
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\u00D7"
+                        color: "#b0b8c8"
+                        font.pixelSize: 13
                     }
-                    popup.background: Rectangle {
-                        color: "#252730"
-                        border.color: "#3a3d4a"
-                        border.width: 1
+                    MouseArea {
+                        id: exprClearMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: exprFilterInput.text = ""
+                    }
+                }
+            }
+
+            // expression selection grid
+            GridView {
+                id: exprGrid
+                width: parent.width
+                height: Math.max(28, Math.min(root.expressionItems.length * 28, 112))
+                cellWidth: 220
+                cellHeight: 28
+                clip: true
+                model: root.filteredItems
+                delegate: Item {
+                    id: exprCell
+                    width: exprGrid.cellWidth
+                    height: exprGrid.cellHeight
+                    required property int index
+                    required property var modelData
+                    property string exprName: String(modelData[0])
+                    property bool selected: root.selectionState[exprCell.exprName] === true
+
+                    Rectangle {
+                        anchors { fill: parent; margins: 3 }
                         radius: 4
+                        color: exprCell.selected ? "#2a4a7a" : "#23252e"
+                        border.color: exprCell.selected ? "#5b9bd5" : "#3a3d4a"
+                        border.width: 1
+                        Text {
+                            anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8; right: parent.right; rightMargin: 4 }
+                            text: exprCell.exprName
+                            color: exprCell.selected ? "#dce8f8" : "#b0b8c8"
+                            font.pixelSize: 12
+                            elide: Text.ElideRight
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: parent.color = exprCell.selected ? "#2a4a7a" : "#2e3040"
+                            onExited:  parent.color = exprCell.selected ? "#2a4a7a" : "#23252e"
+                            onClicked: {
+                                var newSelected = !root.selectionState[exprCell.exprName]
+                                var updated = Object.assign({}, root.selectionState)
+                                updated[exprCell.exprName] = newSelected
+                                root.selectionState = updated
+                                root.selectionChanged(exprCell.exprName, newSelected)
+                            }
+                        }
                     }
                 }
             }
@@ -580,7 +654,6 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     onClicked: {
-                        var varName = variableCombo.currentText
                         var winFn = windowCombo.currentText
                         var zp = zeroPadCombo.currentText
                         var out = outputCombo.currentText
@@ -588,7 +661,7 @@ Item {
                         var from = parseFloat(fromField.text)
                         var to = parseFloat(toField.text)
                         var keepDc = keepDcCheck.checked
-                        root.dialogAccepted(varName, winFn, zp, out, norm, root.rangeMode, from, to, keepDc)
+                        root.dialogAccepted(winFn, zp, out, norm, root.rangeMode, from, to, keepDc)
                     }
                 }
             }

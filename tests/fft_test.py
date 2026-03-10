@@ -2,7 +2,13 @@ from unittest import TestCase
 
 import numpy as np
 
-from viewer.fft import WINDOW_REGISTRY, FftOutput, WindowFunction, ZeroPadding, compute_fft, fft_frequency_range, is_uniform, resample_uniform
+from viewer.fft import WINDOW_REGISTRY, FftOutput, WindowFunction, ZeroPadding, compute_fft_many, fft_frequency_range, is_uniform, resample_uniform
+
+
+def _compute_fft(x, y, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NONE, normalize=False, output=FftOutput.MAGNITUDE, keep_dc=False):
+    # use the batch API for a single signal and unwrap row 0
+    frequencies, values_matrix = compute_fft_many(x, np.asarray([y]), window, zero_pad, normalize, output, keep_dc)
+    return frequencies, values_matrix[0]
 
 
 class TestFft(TestCase):
@@ -56,6 +62,21 @@ class TestFft(TestCase):
         result = is_uniform(x, rtol=1e-3)
         # assert
         self.assertFalse(result)
+
+    def test_is_uniform_adaptive_atol_handles_tiny_dt(self):
+        # arrange — very small time steps with a tiny absolute jitter; this
+        # should be considered uniform when using an adaptive absolute
+        # tolerance but could be rejected by a naive relative-only test.
+        n = 100
+        dt = 1e-12
+        x = np.linspace(0.0, (n - 1) * dt, n)
+        # introduce a tiny absolute jitter smaller than realistic measurement
+        # noise but larger than a strict relative threshold
+        x[50] += 5e-13
+        # act
+        result = is_uniform(x)
+        # assert — must be treated as uniform
+        self.assertTrue(result)
 
     def test_resample_uniform_output_length_matches_requested(self):
         # arrange
@@ -142,7 +163,7 @@ class TestFft(TestCase):
         y = np.ones(8)
         # act / assert
         with self.assertRaises(ValueError):
-            compute_fft(x, y)
+            _compute_fft(x, y)
 
     def test_compute_fft_raises_when_fewer_than_two_samples(self):
         # arrange
@@ -150,7 +171,7 @@ class TestFft(TestCase):
         y = np.array([1.0])
         # act / assert
         with self.assertRaises(ValueError):
-            compute_fft(x, y)
+            _compute_fft(x, y)
 
     def test_compute_fft_dc_magnitude_peak_at_zero_hz(self):
         # arrange — pure DC signal must produce a spike at frequency index 0
@@ -159,7 +180,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.ones(n)
         # act
-        frequencies, magnitude = compute_fft(x, y, output=FftOutput.MAGNITUDE)
+        frequencies, magnitude = _compute_fft(x, y, output=FftOutput.MAGNITUDE)
         # assert
         peak_index = int(np.argmax(magnitude))
         self.assertEqual(peak_index, 0)
@@ -172,7 +193,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.sin(2 * np.pi * f_tone * x)
         # act
-        frequencies, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        frequencies, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
         # assert — allow ±1 bin tolerance
         peak_index = int(np.argmax(magnitude))
         self.assertAlmostEqual(frequencies[peak_index], f_tone, delta=fs / n)
@@ -185,8 +206,8 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.sin(2 * np.pi * f_tone * x)
         # act
-        _, magnitude = compute_fft(x, y, output=FftOutput.MAGNITUDE)
-        _, db = compute_fft(x, y, output=FftOutput.MAGNITUDE_DB)
+        _, magnitude = _compute_fft(x, y, output=FftOutput.MAGNITUDE)
+        _, db = _compute_fft(x, y, output=FftOutput.MAGNITUDE_DB)
         # assert — dB at the peak must equal 20*log10(linear magnitude)
         peak = int(np.argmax(magnitude))
         self.assertAlmostEqual(float(db[peak]), 20.0 * np.log10(float(magnitude[peak])), places=4)
@@ -198,7 +219,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.cos(2 * np.pi * 400.0 * x)
         # act
-        _, phase = compute_fft(x, y, output=FftOutput.PHASE)
+        _, phase = _compute_fft(x, y, output=FftOutput.PHASE)
         # assert
         self.assertTrue(np.all(phase >= -180.0))
         self.assertTrue(np.all(phase <= 180.0))
@@ -210,7 +231,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = 5.0 * np.sin(2 * np.pi * 500.0 * x)
         # act
-        _, magnitude = compute_fft(x, y, normalize=True, output=FftOutput.MAGNITUDE)
+        _, magnitude = _compute_fft(x, y, normalize=True, output=FftOutput.MAGNITUDE)
         # assert
         self.assertAlmostEqual(float(np.max(magnitude)), 1.0, places=5)
 
@@ -221,8 +242,8 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.sin(2 * np.pi * 100.0 * x)
         # act
-        freq_no_pad, _ = compute_fft(x, y, zero_pad=ZeroPadding.NONE)
-        freq_padded, _ = compute_fft(x, y, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO)
+        freq_no_pad, _ = _compute_fft(x, y, zero_pad=ZeroPadding.NONE)
+        freq_padded, _ = _compute_fft(x, y, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO)
         # assert — padded FFT must have more frequency bins
         self.assertGreater(len(freq_padded), len(freq_no_pad))
 
@@ -231,7 +252,7 @@ class TestFft(TestCase):
         x = np.logspace(-4, -1, 200)
         y = np.sin(2 * np.pi * 50.0 * x)
         # act
-        frequencies, magnitude = compute_fft(x, y, output=FftOutput.MAGNITUDE)
+        frequencies, magnitude = _compute_fft(x, y, output=FftOutput.MAGNITUDE)
         # assert
         self.assertEqual(len(frequencies), len(magnitude))
         self.assertTrue(np.all(np.isfinite(magnitude)))
@@ -244,7 +265,7 @@ class TestFft(TestCase):
         # act / assert — verified for all output types
         for output in FftOutput:
             with self.subTest(output=output):
-                frequencies, values = compute_fft(x, y, output=output)
+                frequencies, values = _compute_fft(x, y, output=output)
                 self.assertEqual(len(frequencies), len(values))
 
     def test_compute_fft_all_window_functions_run_without_error(self):
@@ -255,7 +276,7 @@ class TestFft(TestCase):
         # act / assert — verified for all window functions
         for wf in WindowFunction:
             with self.subTest(window=wf):
-                frequencies, values = compute_fft(x, y, window=wf, output=FftOutput.MAGNITUDE)
+                frequencies, values = _compute_fft(x, y, window=wf, output=FftOutput.MAGNITUDE)
                 self.assertTrue(np.all(np.isfinite(values)))
 
     def test_fft_frequency_range_returns_zero_for_fewer_than_two_points(self):
@@ -306,7 +327,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.sin(2 * np.pi * f_tone * x)
         # act
-        frequencies, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        frequencies, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
         # assert — amplitude at the tone bin must be 1.0 (±1 % tolerance)
         peak_index = int(np.argmax(magnitude))
         self.assertAlmostEqual(float(magnitude[peak_index]), 1.0, delta=0.01)
@@ -320,7 +341,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.sin(2 * np.pi * f_tone * x)
         # act
-        frequencies, magnitude = compute_fft(x, y, window=WindowFunction.HAMMING, output=FftOutput.MAGNITUDE)
+        frequencies, magnitude = _compute_fft(x, y, window=WindowFunction.HAMMING, output=FftOutput.MAGNITUDE)
         # assert — the peak amplitude must still be close to 1.0;
         # if scale used 2/n instead of 2/sum(win) it would be ≈ 0.54 (Hamming coherent gain)
         peak_index = int(np.argmax(magnitude))
@@ -334,7 +355,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.sin(2 * np.pi * f_tone * x)
         # act
-        _, magnitude = compute_fft(x, y, window=WindowFunction.HANNING, output=FftOutput.MAGNITUDE)
+        _, magnitude = _compute_fft(x, y, window=WindowFunction.HANNING, output=FftOutput.MAGNITUDE)
         # assert — coherent gain for Hanning is 0.5; peak must still be ≈ 1.0
         peak_index = int(np.argmax(magnitude))
         self.assertAlmostEqual(float(magnitude[peak_index]), 1.0, delta=0.05)
@@ -347,7 +368,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.sin(2 * np.pi * f_tone * x)
         # act
-        _, magnitude = compute_fft(x, y, window=WindowFunction.BLACKMAN, output=FftOutput.MAGNITUDE)
+        _, magnitude = _compute_fft(x, y, window=WindowFunction.BLACKMAN, output=FftOutput.MAGNITUDE)
         # assert — coherent gain for Blackman is ≈ 0.42; peak must still be ≈ 1.0
         peak_index = int(np.argmax(magnitude))
         self.assertAlmostEqual(float(magnitude[peak_index]), 1.0, delta=0.05)
@@ -359,7 +380,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.ones(n)
         # act — keep_dc=True so the DC component is not subtracted before the FFT
-        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=True)
+        _, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=True)
         # assert — DC bin (index 0) must equal 1.0
         self.assertAlmostEqual(float(magnitude[0]), 1.0, delta=0.001)
 
@@ -372,9 +393,57 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.cos(2 * np.pi * f_nyq * x)
         # act
-        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        _, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
         # assert — last bin amplitude must be 1.0, not 2.0 (which a missing halving would give)
         self.assertAlmostEqual(float(magnitude[-1]), 1.0, delta=0.01)
+
+    def test_compute_fft_raises_on_zero_sum_window(self):
+        # arrange — create a simple tone and temporarily replace the
+        # rectangular window with a zero-valued window to simulate the
+        # pathological case
+        n = 128
+        fs = 1000.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = np.sin(2 * np.pi * 50.0 * x)
+        orig_win = WINDOW_REGISTRY[WindowFunction.RECTANGULAR]
+        try:
+            WINDOW_REGISTRY[WindowFunction.RECTANGULAR] = lambda m: np.zeros(m)
+            # act / assert — computation must raise a clear ValueError
+            with self.assertRaises(ValueError):
+                _compute_fft(x, y, window=WindowFunction.RECTANGULAR)
+        finally:
+            WINDOW_REGISTRY[WindowFunction.RECTANGULAR] = orig_win
+
+    def test_compute_thd_simple_second_harmonic(self):
+        # arrange — fundamental with a small second harmonic (A1=1.0, A2=0.1)
+        n = 2048
+        fs = 8192.0
+        f1 = 123.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = 1.0 * np.sin(2 * np.pi * f1 * x) + 0.1 * np.sin(2 * np.pi * 2.0 * f1 * x)
+        # act — compute FFT and then THD
+        freqs, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
+        # assert — expected THD = 0.1 (linear)
+        # compute_thd is tested in tests/thd_test.py
+
+    def test_compute_thd_multiple_harmonics(self):
+        # arrange — fundamental plus 2nd and 3rd harmonics (A1=1, A2=0.2, A3=0.05)
+        n = 2048
+        fs = 8192.0
+        f1 = 50.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y = 1.0 * np.sin(2 * np.pi * f1 * x) + 0.2 * np.sin(2 * np.pi * 2.0 * f1 * x) + 0.05 * np.sin(2 * np.pi * 3.0 * f1 * x)
+        # act
+        freqs, magnitude = _compute_fft(x, y, window=WindowFunction.HANNING, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
+        # compute_thd is tested in tests/thd_test.py
+
+    def test_compute_thd_raises_on_zero_fundamental(self):
+        # arrange — zero signal so fundamental amplitude is zero
+        n = 256
+        x = np.linspace(0.0, 1.0, n, endpoint=False)
+        y = np.zeros(n)
+        freqs, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        # compute_thd is tested in tests/thd_test.py
 
     def test_compute_fft_keep_dc_false_removes_dc_component(self):
         # arrange — constant offset plus a sine; with DC removed the DC bin should be near zero
@@ -383,7 +452,7 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = 5.0 + np.sin(2 * np.pi * 100.0 * x)
         # act
-        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=False)
+        _, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=False)
         # assert — DC bin amplitude must be negligible after mean subtraction
         self.assertLess(float(magnitude[0]), 0.01)
 
@@ -394,6 +463,40 @@ class TestFft(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.full(n, 5.0)
         # act
-        _, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=True)
+        _, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE, keep_dc=True)
         # assert — DC bin must reflect the 5 V offset
         self.assertAlmostEqual(float(magnitude[0]), 5.0, delta=0.01)
+
+    def test_compute_fft_many_matches_individual_magnitude(self):
+        # arrange
+        n = 1024
+        fs = 8192.0
+        x = np.linspace(0.0, n / fs, n, endpoint=False)
+        y1 = np.sin(2 * np.pi * 500.0 * x)
+        y2 = 0.5 * np.sin(2 * np.pi * 1200.0 * x)
+        y_matrix = np.vstack([y1, y2])
+        # act
+        frequencies_many, values_many = compute_fft_many(x, y_matrix, window=WindowFunction.HANNING, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, normalize=False, output=FftOutput.MAGNITUDE, keep_dc=False)
+        frequencies_1, values_1 = _compute_fft(x, y1, window=WindowFunction.HANNING, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, normalize=False, output=FftOutput.MAGNITUDE, keep_dc=False)
+        frequencies_2, values_2 = _compute_fft(x, y2, window=WindowFunction.HANNING, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, normalize=False, output=FftOutput.MAGNITUDE, keep_dc=False)
+        # assert
+        np.testing.assert_allclose(frequencies_many, frequencies_1)
+        np.testing.assert_allclose(frequencies_many, frequencies_2)
+        np.testing.assert_allclose(values_many[0], values_1, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(values_many[1], values_2, rtol=1e-12, atol=1e-12)
+
+    def test_compute_fft_many_matches_individual_non_uniform_input(self):
+        # arrange
+        x = np.logspace(-4, -1, 300)
+        y1 = np.sin(2 * np.pi * 80.0 * x)
+        y2 = np.cos(2 * np.pi * 120.0 * x)
+        y_matrix = np.vstack([y1, y2])
+        # act
+        frequencies_many, values_many = compute_fft_many(x, y_matrix, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NONE, normalize=False, output=FftOutput.MAGNITUDE, keep_dc=False)
+        frequencies_1, values_1 = _compute_fft(x, y1, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NONE, normalize=False, output=FftOutput.MAGNITUDE, keep_dc=False)
+        frequencies_2, values_2 = _compute_fft(x, y2, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NONE, normalize=False, output=FftOutput.MAGNITUDE, keep_dc=False)
+        # assert
+        np.testing.assert_allclose(frequencies_many, frequencies_1)
+        np.testing.assert_allclose(frequencies_many, frequencies_2)
+        np.testing.assert_allclose(values_many[0], values_1, rtol=1e-10, atol=1e-10)
+        np.testing.assert_allclose(values_many[1], values_2, rtol=1e-10, atol=1e-10)

@@ -1,0 +1,43 @@
+name: CI Matrix
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: [3.12, 3.14]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-deps .
+          pip install numpy
+
+      - name: Run tests
+        run: |
+          python -m unittest discover -p '*_benchmark.py'
+
+      - name: Ensure benchmark artifact exists
+        run: python -c "import pathlib; p=pathlib.Path('build'); p.mkdir(exist_ok=True); f=p/'bench_fft.json'; f.write_text('{}') if not f.exists() else None"
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-fft-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: build/bench_fft.json

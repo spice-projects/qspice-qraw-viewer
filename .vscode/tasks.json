@@ -1,16 +1,5 @@
 {
     "version": "2.0.0",
     "tasks": [
-        {
-            "label": "Compile UI files",
-            "type": "shell",
-            "command": "for f in viewer/*.ui; do .venv/bin/pyside6-uic \"$f\" -o \"viewer/ui_$(basename ${f%.ui}).py\"; done",
-            "group": "build",
-            "presentation": {
-                "reveal": "silent",
-                "panel": "shared"
-            },
-            "problemMatcher": []
-        }
     ]
 }
