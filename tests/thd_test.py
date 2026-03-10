@@ -2,8 +2,14 @@ from unittest import TestCase
 
 import numpy as np
 
-from viewer.fft import compute_fft, WindowFunction, ZeroPadding, FftOutput
+from viewer.fft import FftOutput, WindowFunction, ZeroPadding, compute_fft_many
 from viewer.thd import compute_thd
+
+
+def _compute_fft(x, y, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NONE, normalize=False, output=FftOutput.MAGNITUDE, keep_dc=False):
+    # use the batch API for a single signal and unwrap row 0
+    frequencies, values_matrix = compute_fft_many(x, np.asarray([y]), window, zero_pad, normalize, output, keep_dc)
+    return frequencies, values_matrix[0]
 
 
 class TestThd(TestCase):
@@ -16,7 +22,7 @@ class TestThd(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = 1.0 * np.sin(2 * np.pi * f1 * x) + 0.1 * np.sin(2 * np.pi * 2.0 * f1 * x)
         # act — compute FFT and then THD
-        freqs, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
+        freqs, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
         thd = compute_thd(freqs, magnitude, n_harmonics=2)
         # assert — expected THD = 0.1 (linear)
         self.assertAlmostEqual(float(thd), 0.1, places=2)
@@ -29,7 +35,7 @@ class TestThd(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = 1.0 * np.sin(2 * np.pi * f1 * x) + 0.2 * np.sin(2 * np.pi * 2.0 * f1 * x) + 0.05 * np.sin(2 * np.pi * 3.0 * f1 * x)
         # act
-        freqs, magnitude = compute_fft(x, y, window=WindowFunction.HANNING, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
+        freqs, magnitude = _compute_fft(x, y, window=WindowFunction.HANNING, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
         thd = compute_thd(freqs, magnitude, n_harmonics=3)
         # expected THD = sqrt(0.2^2 + 0.05^2) / 1.0
         expected = float((0.2 ** 2 + 0.05 ** 2) ** 0.5)
@@ -41,7 +47,7 @@ class TestThd(TestCase):
         n = 256
         x = np.linspace(0.0, 1.0, n, endpoint=False)
         y = np.zeros(n)
-        freqs, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
+        freqs, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, output=FftOutput.MAGNITUDE)
         # act / assert
         with self.assertRaises(ValueError):
             compute_thd(freqs, magnitude)
@@ -55,7 +61,7 @@ class TestThd(TestCase):
         x = np.linspace(0.0, n / fs, n, endpoint=False)
         y = np.sin(2 * np.pi * f1 * x)
         # act — compute FFT and then THD
-        freqs, magnitude = compute_fft(x, y, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
+        freqs, magnitude = _compute_fft(x, y, window=WindowFunction.RECTANGULAR, zero_pad=ZeroPadding.NEXT_POWER_OF_TWO, output=FftOutput.MAGNITUDE)
         thd = compute_thd(freqs, magnitude, n_harmonics=5)
         # assert — THD should be effectively zero (allow tiny numerical tolerance)
         self.assertAlmostEqual(float(thd), 0.0, delta=1e-6)

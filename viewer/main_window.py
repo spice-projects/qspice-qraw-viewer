@@ -2,6 +2,7 @@ import logging
 import time
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
 from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QKeySequence
 from PySide6.QtQuick import QQuickView
@@ -11,7 +12,7 @@ from .add_plot_dialog import AddPlotDialog
 from .chart import Chart
 from .expression import Expression
 from .expression_manager import ExpressionManager
-from .fft import FftOutput, compute_fft, is_uniform
+from .fft import FftOutput, compute_fft_many
 from .fft_dialog import FftDialog
 from .jupyter_window import JupyterWindow
 from .qraw_file import AbscissaScale, QRawFile
@@ -369,10 +370,6 @@ class MainWindow(QMainWindow):
             logger.warning("No suitable time-domain expressions to FFT on chart %d", chart_index)
             # exit
             return
-        # check for non-uniform sampling and log a warning; the dialog will proceed — fft.py will resample automatically
-        if not is_uniform(self._abscissa.values):
-            # log warning — FFT will resample to a uniform grid before computing
-            logger.warning("Chart %d abscissa is non-uniformly sampled; FFT will resample to uniform grid", chart_index)
         # open FFT settings dialog
         dialog = FftDialog(expressions, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self)
         if dialog.exec() != FftDialog.DialogCode.Accepted:
@@ -392,26 +389,24 @@ class MainWindow(QMainWindow):
         step_points = len(self._abscissa.data)
         # shared abscissa slice for all selected expressions
         x = self._abscissa.values[from_index:to_index]
-        # compute FFT for each selected expression and accumulate results
-        fft_expressions: list[Expression] = []
-        frequencies = None
-        for expression in result_expressions:
-            y = expression.values[0:step_points][from_index:to_index]
-            try:
-                frequencies, fft_values = compute_fft(x, y, window, zero_pad, normalize, output, keep_dc)
-            except ValueError:
-                # log exception and skip this expression; continue with the remaining ones
-                logger.exception("FFT computation failed for expression '%s'", expression.name)
-                continue
-            # guard against an unexpectedly empty result
-            if len(frequencies) == 0:
-                logger.error("FFT computation returned empty result for expression '%s'", expression.name)
-                continue
-            fft_expressions.append(Expression(f"FFT({expression.name})", fft_values, fft_unit))
-        # abort if no expression produced a valid result
-        if not fft_expressions:
-            logger.error("All FFT computations failed; no results to display")
+        # build a dense matrix of selected signals using the shared x slice
+        y_matrix = np.vstack([expression.values[0:step_points][from_index:to_index] for expression in result_expressions])
+        try:
+            # compute FFT for all selected expressions in a single batch call
+            frequencies, fft_matrix = compute_fft_many(x, y_matrix, window, zero_pad, normalize, output, keep_dc)
+        except ValueError:
+            # log exception and abort when the shared batch computation fails
+            logger.exception("Batch FFT computation failed for chart %d", chart_index)
+            # exit
             return
+        # guard against an unexpectedly empty frequency axis
+        if len(frequencies) == 0:
+            # log error and abort when no frequencies are returned
+            logger.error("FFT computation returned an empty frequency axis for chart %d", chart_index)
+            # exit
+            return
+        # build FFT expressions preserving the selected input order
+        fft_expressions = [Expression(f"FFT({expression.name})", fft_values, fft_unit) for expression, fft_values in zip(result_expressions, fft_matrix)]
         # create frequency expression for the shared abscissa
         freq_expression = Expression("Frequency", frequencies, "Hz")
         # build expression manager with frequency abscissa and all FFT results
