@@ -80,12 +80,6 @@ python -m viewer path/to/file.qraw --log-level=DEBUG
 
 ## Developer notes
 
-- Compile QML `.ui` files (VS Code task: "Compile UI files"):
-
-```bash
-for f in viewer/*.ui; do .venv/bin/pyside6-uic "$f" -o "viewer/ui_$(basename ${f%.ui}).py"; done
-```
-
 - Run the test suite:
 
 ```bash

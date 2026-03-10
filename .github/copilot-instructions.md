@@ -17,9 +17,6 @@ python -m viewer <file.qraw> --headless   # parse without UI
 
 # Run tests
 python -m unittest discover -p '*_test.py'
-
-# Compile .ui files (VS Code task: "Compile UI files")
-for f in viewer/*.ui; do .venv/bin/pyside6-uic "$f" -o "viewer/ui_$(basename ${f%.ui}).py"; done
 ```
 
 ## Architecture
