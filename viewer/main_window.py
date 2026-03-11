@@ -311,7 +311,7 @@ class MainWindow(QMainWindow):
         logger.debug("User requested zoom abscissa extent on chart at index: %d", chart_index)
         # update fields
         self._abscissa_from_index = 0
-        self._abscissa_to_index = len(self._abscissa.values)
+        self._abscissa_to_index = len(self._abscissa.data)
         # update charts
         for chart in self._charts:
             # update zoom window
@@ -388,9 +388,9 @@ class MainWindow(QMainWindow):
         # number of samples per step (abscissa is already trimmed to one period)
         step_points = len(self._abscissa.data)
         # shared abscissa slice for all selected expressions
-        x = self._abscissa.values[from_index:to_index]
+        x = self._abscissa.data[from_index:to_index]
         # build a dense matrix of selected signals using the shared x slice
-        y_matrix = np.vstack([expression.values[0:step_points][from_index:to_index] for expression in result_expressions])
+        y_matrix = np.vstack([expression.data[0:step_points][from_index:to_index] for expression in result_expressions])
         try:
             # compute FFT for all selected expressions in a single batch call
             frequencies, fft_matrix = compute_fft_many(x, y_matrix, window, zero_pad, normalize, output, keep_dc)
@@ -441,7 +441,7 @@ class MainWindow(QMainWindow):
         # index within the zoom window based on the supplied x_ratio
         idx = max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
         # retrieve the stored abscissa value (may be in log space for decade/octave scales)
-        x_stored = float(self._abscissa.values[idx])
+        x_stored = float(self._abscissa.data[idx])
         # convert stored value back to physical abscissa value
         if self._abscissa_scale == AbscissaScale.DECADE:
             x_actual = 10 ** x_stored

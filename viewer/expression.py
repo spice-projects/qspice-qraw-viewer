@@ -16,8 +16,6 @@ class Expression:
         self._unit = unit
         self._complex = data.dtype == np.complex128
         self._source = source
-        # contiguos data in memory
-        self._contiguous_data: np.ndarray | None = None
 
     @property
     def name(self) -> str:
@@ -28,16 +26,6 @@ class Expression:
     def data(self) -> np.ndarray:
         """Evaluated data array, one value per simulation point."""
         return self._data
-
-    @property
-    def values(self) -> np.ndarray:
-        """Evaluated data array, one value per simulation point, guaranteed to be contiguous in memory for efficient plotting."""
-        # check we have calculated contiguous data already
-        if self._contiguous_data is None:
-            # calculate contiguous data from the original data array
-            self._contiguous_data = self._data if self._data.flags.c_contiguous else np.ascontiguousarray(self._data)
-        # exit
-        return self._contiguous_data
 
     @property
     def unit(self) -> str:

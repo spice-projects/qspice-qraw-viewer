@@ -44,7 +44,7 @@ class FftDialog(QDialog):
         # result fields populated when the dialog is accepted
         self._result_expressions: list[Expression] = []
         self._result_from_index: int = 0
-        self._result_to_index: int = len(abscissa.values)
+        self._result_to_index: int = len(abscissa.data)
         self._result_window: WindowFunction = WindowFunction.HANNING
         self._result_zero_pad: ZeroPadding = ZeroPadding.NONE
         self._result_normalize: bool = False
@@ -56,7 +56,7 @@ class FftDialog(QDialog):
         self.resize(480, 650)
         self.setMinimumHeight(650)
         # compute frequency-range preview from the full abscissa
-        abscissa_values = abscissa.values
+        abscissa_values = abscissa.data
         df, f_nyquist = fft_frequency_range(abscissa_values)
         # expose data to QML via context properties
         # build the initial property values for the QML root object
@@ -144,7 +144,7 @@ class FftDialog(QDialog):
         # keep dc flag
         self._result_keep_dc = keep_dc
         # data range
-        abscissa_values = self._abscissa.values
+        abscissa_values = self._abscissa.data
         # total number of abscissa samples
         total = len(abscissa_values)
         if range_mode == "zoom":
