@@ -1,4 +1,3 @@
-"""Evaluator that walks an expression AST and produces an :class:`~viewer.expression.Expression`."""
 from __future__ import annotations
 
 import re
@@ -13,21 +12,73 @@ from .expression_node import BinaryOp, BinaryOpNode, ExprNode, FunctionCallNode,
 # returns an ndarray; all functions must handle complex inputs gracefully
 # because AC analysis variables are complex-valued
 _FUNCTION_IMPLS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
-    "abs":   np.abs,
-    "sqrt":  np.sqrt,
+    "abs": np.abs,
+    "sqrt": np.sqrt,
     # in SPICE, log is an alias for log10
-    "log":   np.log10,
+    "log": np.log10,
     "log10": np.log10,
-    "ln":    np.log,
+    "ln": np.log,
     "db": lambda x: 20.0 * np.log10(np.abs(x)),
-    "real":  np.real,
-    "imag":  np.imag,
+    "real": np.real,
+    "imag": np.imag,
     "angle": lambda x: np.angle(x, deg=True),
-    "mag":   np.abs,
-    "sin":   np.sin,
-    "cos":   np.cos,
-    "tan":   np.tan,
-    "exp":   np.exp,
+    # ph / phase are QSPICE aliases for angle (returns degrees)
+    "ph": lambda x: np.angle(x, deg=True),
+    "phase": lambda x: np.angle(x, deg=True),
+    "mag": np.abs,
+    "sin": np.sin,
+    "cos": np.cos,
+    "tan": np.tan,
+    # inverse trigonometric functions; return values are in radians
+    "asin": np.arcsin,
+    "arcsin": np.arcsin,
+    "acos": np.arccos,
+    "arccos": np.arccos,
+    "atan": np.arctan,
+    "arctan": np.arctan,
+    # hyperbolic functions
+    "sinh": np.sinh,
+    "cosh": np.cosh,
+    "tanh": np.tanh,
+    "exp": np.exp,
+    # complex conjugate; preserves the physical unit of its argument
+    "conj": np.conj,
+    # sqr(x) = x^2; unit is not tracked (would be unit-squared)
+    "sqr": lambda x: x ** 2,
+    # sign / sgn: −1, 0 or +1 element-wise; dimensionless
+    "sign": np.sign,
+    "sgn": np.sign,
+    # uramp(x) = max(x, 0); used in SPICE behavioural sources
+    "uramp": lambda x: np.maximum(np.real(x), 0.0),
+    # rounding functions; preserve the physical unit
+    "round": np.round,
+    "floor": np.floor,
+    "ceil": np.ceil,
+    # int(x) truncates toward zero, matching SPICE/QSPICE behaviour
+    "int": np.trunc,
+}
+
+
+# two-argument functions: (a, b) → ndarray
+_FUNCTION_IMPLS_2: dict[str, Callable[[np.ndarray, np.ndarray], np.ndarray]] = {
+    # atan2(y, x) follows the standard C / numpy argument order; returns radians
+    "atan2": lambda y, x: np.arctan2(np.real(y), np.real(x)),
+    # pow(x, y) = x^y — function form of the ^ operator
+    "pow": lambda x, y: x ** y,
+    # pwr(x, y) = |x|^y — always non-negative (SPICE convention for pwr)
+    "pwr": lambda x, y: np.abs(x) ** np.real(y),
+    # pwrs(x, y) = sgn(x) * |x|^y — signed power
+    "pwrs": lambda x, y: np.sign(np.real(x)) * np.abs(x) ** np.real(y),
+    # min / max operate on the real parts of their arguments
+    "min": lambda a, b: np.minimum(np.real(a), np.real(b)),
+    "max": lambda a, b: np.maximum(np.real(a), np.real(b)),
+}
+
+
+# three-argument functions: (x, lo, hi) → ndarray
+_FUNCTION_IMPLS_3: dict[str, Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray]] = {
+    # limit(x, lo, hi) clamps x; equivalent to LTspice / QSPICE limit()
+    "limit": lambda x, lo, hi: np.clip(np.real(x), np.real(lo), np.real(hi)),
 }
 
 
@@ -41,56 +92,92 @@ _TWO_ARG_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(([^,]+),\s*([^)]+)\)$")
 # "pi" is a dimensionless mathematical constant; "mho" is the conductance unit (S = A/V) used
 # in QSPICE-generated .alias expressions such as '.alias I(R4) (1mho*V(out,0))'.
 _CONSTANTS: dict[str, tuple[float, str]] = {
-    "pi":  (np.pi, ""),
+    "pi": (np.pi, ""),
     "mho": (1.0, "S"),
 }
 
 
 def _propagate_binary_unit(left_unit: str, op: BinaryOp, right_unit: str) -> str:
-    """Infer the resulting physical unit of a binary operation."""
+    # +, -
     if op in (BinaryOp.ADD, BinaryOp.SUB):
         # units must be identical for addition/subtraction
         return left_unit if left_unit == right_unit else ""
+    # *
     if op == BinaryOp.MUL:
+        # W = V × A
         if {left_unit, right_unit} == {"V", "A"}:
             return "W"
+        # S = A × V  (same as V × A, but check both orders)
         if {left_unit, right_unit} == {"S", "V"}:
             # siemens × volt = ampere  (S = A/V  →  S·V = A)
             return "A"
-        # scalar (dimensionless) factor preserves the other operand's unit
+        # if one side is dimensionless, the result has the same unit as the other side
         if left_unit == "":
             return right_unit
-        if right_unit == "":
-            return left_unit
-        return ""
+        # left unit if any
+        return left_unit
+    # /
     if op == BinaryOp.DIV:
+        # unit / unit = dimensionless ratio
         if left_unit == right_unit:
-            # dimensionless ratio
             return ""
+        # Ω = V / A
         if left_unit == "V" and right_unit == "A":
             return "Ω"
+        # S = A / V
         if left_unit == "A" and right_unit == "V":
             return "S"
+        # if the denominator is dimensionless, the result has the same unit as the numerator
         if right_unit == "":
-            # divide by scalar
             return left_unit
+        # if the numerator is dimensionless
+        if left_unit == "":
+            # Ω = 1 / S
+            if right_unit == "S":
+                return "Ω"
+            # S = 1 / Ω
+            if right_unit == "Ω":
+                return "S"
+            # Hz = 1 / s
+            if right_unit == "s":
+                return "Hz"
+            # s = 1 / Hz
+            if right_unit == "Hz":
+                return "s"
+        # reset unit
         return ""
     # pow — unit tracking for arbitrary exponents is not well-defined
     return ""
 
 
 def _function_unit(func_name: str, arg_unit: str) -> str:
-    """Infer the unit produced by a mathematical function call."""
+    """Infer the unit produced by a single-argument mathematical function call."""
     lower = func_name.lower()
-    # functions that produce a fixed unit regardless of input
+    # always dB
     if lower == "db":
         return "dB"
-    if lower == "angle":
+    # always angle in degrees
+    if lower in ("angle", "ph", "phase"):
         return "°"
     # functions that preserve the physical unit of their argument
-    if lower in ("abs", "real", "imag", "mag"):
+    if lower in ("abs", "real", "imag", "mag", "conj", "uramp", "round", "floor", "ceil", "int"):
         return arg_unit
-    # all other functions (sqrt, log, sin, exp, …) strip the physical dimension
+    # all other functions (sqrt, trig, exp, …) strip the physical dimension
+    return ""
+
+
+def _function_unit_multi(func_name: str, first_arg_unit: str) -> str:
+    """Infer the unit produced by a multi-argument mathematical function call."""
+    lower = func_name.lower()
+    # atan2 returns an angle in radians — treated as dimensionless here
+    if lower == "atan2":
+        return ""
+    # pow / pwr / pwrs: unit exponentiation is not well-defined in general
+    if lower in ("pow", "pwr", "pwrs"):
+        return ""
+    # min / max / limit propagate the first argument's physical unit
+    if lower in ("min", "max", "limit"):
+        return first_arg_unit
     return ""
 
 
@@ -183,19 +270,39 @@ class ExpressionEvaluator:
         raise ValueError(f"unknown AST node type: {type(node).__name__}")
 
     def _eval_function(self, node: FunctionCallNode, context: dict[str, Expression]) -> tuple[np.ndarray, str]:
-        # look up the function implementation
-        func = _FUNCTION_IMPLS.get(node.name.lower())
-        # raise if the function is not supported
-        if func is None:
-            raise ValueError(f"unknown function: {node.name!r}")
-        # raise if the argument count is wrong
-        if len(node.args) != 1:
-            raise ValueError(f"function {node.name!r} expects exactly 1 argument, got {len(node.args)}")
-        arg_data, arg_unit = self._eval(node.args[0], context)
-        result_data = func(arg_data)
-        result_unit = _function_unit(node.name, arg_unit)
-        # exit
-        return result_data, result_unit
+        lower = node.name.lower()
+        # single-argument functions
+        func1 = _FUNCTION_IMPLS.get(lower)
+        if func1 is not None:
+            if len(node.args) != 1:
+                raise ValueError(f"function {node.name!r} expects exactly 1 argument, got {len(node.args)}")
+            arg_data, arg_unit = self._eval(node.args[0], context)
+            result_data = func1(arg_data)
+            result_unit = _function_unit(node.name, arg_unit)
+            return result_data, result_unit
+        # two-argument functions
+        func2 = _FUNCTION_IMPLS_2.get(lower)
+        if func2 is not None:
+            if len(node.args) != 2:
+                raise ValueError(f"function {node.name!r} expects exactly 2 arguments, got {len(node.args)}")
+            a_data, a_unit = self._eval(node.args[0], context)
+            b_data, _ = self._eval(node.args[1], context)
+            result_data = func2(a_data, b_data)
+            result_unit = _function_unit_multi(node.name, a_unit)
+            return result_data, result_unit
+        # three-argument functions
+        func3 = _FUNCTION_IMPLS_3.get(lower)
+        if func3 is not None:
+            if len(node.args) != 3:
+                raise ValueError(f"function {node.name!r} expects exactly 3 arguments, got {len(node.args)}")
+            a_data, a_unit = self._eval(node.args[0], context)
+            b_data, _ = self._eval(node.args[1], context)
+            c_data, _ = self._eval(node.args[2], context)
+            result_data = func3(a_data, b_data, c_data)
+            result_unit = _function_unit_multi(node.name, a_unit)
+            return result_data, result_unit
+        # raise for unknown functions
+        raise ValueError(f"unknown function: {node.name!r}")
 
     @staticmethod
     def _apply_binary_op(op: BinaryOp, left: np.ndarray, right: np.ndarray) -> np.ndarray:
