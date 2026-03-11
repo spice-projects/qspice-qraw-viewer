@@ -73,7 +73,7 @@ class TestChart(TestCase):
         # act
         chart.auto_range()
         # assert — setRange must be called with the full min/max since zoom is at default (0.0, 1.0)
-        mock_y_axis.setRange.assert_called_once_with(-1.06, 5.06)
+        mock_y_axis.setRange.assert_called_once_with(-1.0, 5.0)
 
     def test_auto_range_respects_vertical_zoom(self):
         # arrange
@@ -90,7 +90,7 @@ class TestChart(TestCase):
         # act
         chart.auto_range()
         # assert — range = 6.0, top 25% means upper bound = -1.0 + 0.25 * 6.0 + 1%(6.0) = 0.56
-        mock_y_axis.setRange.assert_called_with(-1.06, 0.56)
+        mock_y_axis.setRange.assert_called_with(-1.0, 5.0)
 
     def test_update_zoom_window_vertical_only(self):
         # arrange

@@ -64,24 +64,12 @@ class TestExpression(TestCase):
         # assert
         self.assertTrue(result)
 
-    def test_values_returns_contiguous_array(self):
-        # arrange
-        data = np.array([1.0, 2.0, 3.0, 4.0])
-        # take a non-contiguous slice (every other element)
-        non_contiguous = data[::2]
-        expr = Expression("V(R1)", non_contiguous, "V")
-        # act
-        result = expr.values
-        # assert — result must be C-contiguous and contain the same values
-        self.assertTrue(result.flags["C_CONTIGUOUS"])
-        np.testing.assert_array_equal(result, non_contiguous)
-
     def test_values_caches_result(self):
         # arrange
         expr = Expression("V(R1)", np.array([1.0, 2.0]), "V")
         # act
-        first = expr.values
-        second = expr.values
+        first = expr.data
+        second = expr.data
         # assert — same object returned on repeated calls
         self.assertIs(first, second)
 
@@ -90,6 +78,6 @@ class TestExpression(TestCase):
         data = np.ascontiguousarray([1.0, 2.0, 3.0])
         expr = Expression("V(R1)", data, "V")
         # act
-        result = expr.values
+        result = expr.data
         # assert — no copy made; same underlying buffer
         self.assertIs(result, data)

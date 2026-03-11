@@ -50,8 +50,8 @@ class Chart:
 
     def render(self, abscissa_label: str, abscissa_scale: str, initial_expressions: set[Expression]):
         # x0 and x1
-        abscissa_left_value = float(self._abscissa.values[self._zoom_window[0]])
-        abscissa_right_value = float(self._abscissa.values[self._zoom_window[2] - 1])
+        abscissa_left_value = float(self._abscissa.data[self._zoom_window[0]])
+        abscissa_right_value = float(self._abscissa.data[self._zoom_window[2] - 1])
         # initialize chart component
         self._component.initialize(abscissa_label, self._abscissa.unit, abscissa_scale, abscissa_left_value, abscissa_right_value)
         # render all expressions as series
@@ -61,7 +61,7 @@ class Chart:
 
     def plot_series(self, expressions: set[Expression]):
         # apply zoom window to abscissa — shared across all ordinate steps, will be paired with y below
-        abscissa_values = self._abscissa.values[self._zoom_window[0]:self._zoom_window[2]]
+        abscissa_values = self._abscissa.data[self._zoom_window[0]:self._zoom_window[2]]
         # series to render and remove from the chart
         series_to_render: list[tuple[str, list[QLineSeries]]] = []
         series_to_remove: list[tuple[str, list[QLineSeries]]] = []
@@ -109,9 +109,14 @@ class Chart:
                 # loop steps
                 for step in range(self._steps):
                     # ordinate variant values for this step (as contiguous array in memory), apply zoom window
-                    ordinate_values = ordinate_variant.values[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
+                    ordinate_values = ordinate_variant.data[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
                     # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
                     x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
+                    # remove NaN, Inf and -Inf values which can cause issues for chart when plotting
+                    finite_mask = np.isfinite(y_np)
+                    # update x and y with finite values only
+                    x_np = x_np[finite_mask]
+                    y_np = y_np[finite_mask]
                     # create series and hand buffers directly to Qt — no Python loop
                     series = QLineSeries()
                     series.setWidth(1)
@@ -124,7 +129,14 @@ class Chart:
                     max_value = max(max_value, float(np.max(y_np)))
                 # append to lists
                 series_to_render.append([ordinate_variant.name, ordinate_variant_series])
-                ordinate_series.append((ordinate_variant, y_axis, ordinate_variant_series, min_value, max_value))
+                # calculate scale for Y axis
+                scale = max(abs(max_value), abs(min_value))
+                # Y axis range
+                y_range = max_value - min_value
+                if y_range <= scale * 1e-9:
+                    y_range = abs(max_value) * 0.01 if scale != 0 else 1.0
+                # store series with min and max values for later use when auto-ranging axes
+                ordinate_series.append((ordinate_variant, y_axis, ordinate_variant_series, min_value - 0.01 * y_range, max_value + 0.01 * y_range))
             # store reference to allow removal later
             self._series[ordinate.name] = (ordinate, ordinate_series)
         # add/remove series from chart
@@ -146,16 +158,10 @@ class Chart:
                 current_min, current_max = self._axis_ranges.get(y_axis, (float("inf"), float("-inf")))
                 # compute Y values for this variable index
                 self._axis_ranges[y_axis] = (min(current_min, min_value), max(current_max, max_value))
-        # zoom ratios
-        _, y_top_ratio, _, y_bottom_ratio = self._zoom_window
         # update axis ranges based on collected min and max values for each variable type
         for y_axis, (y_min, y_max) in self._axis_ranges.items():
-            # min and max values
-            y_range = y_max - y_min
-            if y_range == 0:
-                y_range = abs(y_max) * 0.01 if y_max != 0 else 1.0
             # set y axis range
-            y_axis.setRange(y_min + y_top_ratio * y_range - 0.01 * y_range, y_min + y_bottom_ratio * y_range + 0.01 * y_range)
+            y_axis.setRange(y_min, y_max)
 
     def update_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
         # vertical changes flag
@@ -183,8 +189,10 @@ class Chart:
         _, y_top_ratio, _, y_bottom_ratio = self._zoom_window
         # update axis ranges based on collected min and max values for each variable type
         for y_axis, (y_min, y_max) in self._axis_ranges.items():
+            # range
+            scale = y_max - y_min
             # set y axis range
-            y_axis.setRange(y_min + y_top_ratio * (y_max - y_min), y_min + y_bottom_ratio * (y_max - y_min))
+            y_axis.setRange(y_min + y_top_ratio * scale, y_min + y_bottom_ratio * scale)
 
     def reset_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
         # vertical changes flag
@@ -201,8 +209,8 @@ class Chart:
             self._zoom_window = (abscissa_from_index, self._zoom_window[1], abscissa_to_index, self._zoom_window[3])
             # process all series to apply the new zoom window, full redraw if horizontal zoom changed
             self._redraw_all_series()
-            # auto range axes based on the new zoom window
-            return self.auto_range()
+            # auto range axes if vertical zoom also changed, otherwise just update axis ranges based on the new zoom window
+            return self.auto_range() if vertical_changed else None
         # check if vertical zoom changed, if not we can skip the redraw and just update the axis ranges based on the new zoom window
         if vertical_changed:
             # log information
@@ -212,7 +220,7 @@ class Chart:
             # update axis ranges based on collected min and max values for each variable type
             for y_axis, (y_min, y_max) in self._axis_ranges.items():
                 # set y axis range
-                y_axis.setRange(y_min + y_top_ratio * (y_max - y_min), y_min + y_bottom_ratio * (y_max - y_min))
+                y_axis.setRange(y_min, y_max)
 
     def clear(self):
         # Qt enqueues the visual removal of series asynchronously. Python owns the QLineSeries, so we must NOT let Python GC them until Qt has finished processing the removal queue.
@@ -249,7 +257,7 @@ class Chart:
                 # loop series list (steps)
                 for step, _ in enumerate(series_list):
                     # value for step at index
-                    values.append(float(ordinate_variant.values[step * self._step_points + idx]))
+                    values.append(float(ordinate_variant.data[step * self._step_points + idx]))
                 # append to result (name, unit, value)
                 result.append((ordinate_variant.name, ordinate_variant.unit, values))
         # exit
@@ -291,37 +299,11 @@ class Chart:
 
     def _redraw_all_series(self):
         # abscissa values — shared across all ordinate steps, will be paired with y below
-        abscissa_values = self._abscissa.values[self._zoom_window[0]:self._zoom_window[2]]
+        abscissa_values = self._abscissa.data[self._zoom_window[0]:self._zoom_window[2]]
         # x0 and x1
         abscissa_min = float(abscissa_values[0])
         abscissa_max = float(abscissa_values[-1])
         try:
-            # check decimation algorithm is NONE, if so we can skip decimation and just update the series with the new zoom window data (no need to create new series or do a full redraw)
-            if _DECIMATION_ALGORITHM == DecimationAlgorithm.NONE:
-                # loop existing series
-                for _, (_, ordinate_series) in self._series.items():
-                    # recalculated min and max values for this variable across all steps based on the new zoom window
-                    new_ordinate_series = []
-                    # loop series data (actual data visible in chart)
-                    for ordinate_variant, y_axis, series_list, _, _ in ordinate_series:
-                        # min and max value recalculation for the new zoom window
-                        min_value = float("inf")
-                        max_value = float("-inf")
-                        # loop steps
-                        for step in range(self._steps):
-                            # ordinate variant values for this step
-                            ordinate_values = ordinate_variant.values[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
-                            # update series with non-decimated data
-                            series_list[step].replaceNp(abscissa_values, ordinate_values)
-                            # update min and max values
-                            min_value = min(min_value, float(np.min(ordinate_values)))
-                            max_value = max(max_value, float(np.max(ordinate_values)))
-                        # append to list for later update of the series data and axis ranges after the loop
-                        new_ordinate_series.append((ordinate_variant, y_axis, series_list, min_value, max_value))
-                    # replace the list contents in-place
-                    ordinate_series[:] = new_ordinate_series
-                # exit
-                return
             # loop existing series
             for _, (_, ordinate_series) in self._series.items():
                 # recalculated min and max values for this variable across all steps based on the new zoom window
@@ -334,16 +316,27 @@ class Chart:
                     # loop steps
                     for step in range(self._steps):
                         # ordinate variant values for this step
-                        ordinate_values = ordinate_variant.values[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
+                        ordinate_values = ordinate_variant.data[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
                         # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
                         x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
+                        # remove NaN, Inf and -Inf values which can cause issues for chart when plotting
+                        finite_mask = np.isfinite(y_np)
+                        # update x and y with finite values only
+                        x_np = x_np[finite_mask]
+                        y_np = y_np[finite_mask]
                         # update series with decimated data
                         series_list[step].replaceNp(x_np, y_np)
                         # update min and max values
                         min_value = min(min_value, float(np.min(y_np)))
                         max_value = max(max_value, float(np.max(y_np)))
+                    # calculate scale for Y axis
+                    scale = max(abs(max_value), abs(min_value))
+                    # Y axis range
+                    y_range = max_value - min_value
+                    if y_range <= scale * 1e-9:
+                        y_range = abs(max_value) * 0.01 if scale != 0 else 1.0
                     # append to list for later update of the series data and axis ranges after the loop
-                    new_ordinate_series.append((ordinate_variant, y_axis, series_list, min_value, max_value))
+                    new_ordinate_series.append((ordinate_variant, y_axis, series_list, min_value - 0.01 * y_range, max_value + 0.01 * y_range))
                 # replace the list contents in-place
                 ordinate_series[:] = new_ordinate_series
         finally:
