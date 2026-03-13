@@ -9,7 +9,17 @@ from .expression_node import BinaryOp, BinaryOpNode, ExprNode, FunctionCallNode,
 # known mathematical functions that accept expressions as arguments;
 # everything else of the form IDENT(...) is treated as a SPICE variable
 # reference whose full text (e.g. "V(out)", "I(R1,0)") is the lookup key
-_MATH_FUNCTIONS: frozenset[str] = frozenset({"abs", "sqrt", "log", "log10", "ln", "db", "dB", "real", "imag", "angle", "mag", "sin", "cos", "tan", "exp"})
+_MATH_FUNCTIONS: frozenset[str] = frozenset({
+    "abs", "sqrt", "log", "log10", "ln", "db", "dB",
+    "real", "imag", "angle", "ph", "phase", "mag",
+    "sin", "cos", "tan", "exp",
+    "asin", "arcsin", "acos", "arccos", "atan", "arctan", "atan2",
+    "sinh", "cosh", "tanh",
+    "conj", "sqr", "sign", "sgn", "uramp",
+    "round", "floor", "ceil", "int",
+    "pow", "pwr", "pwrs",
+    "min", "max", "limit",
+})
 
 
 class _Token(NamedTuple):

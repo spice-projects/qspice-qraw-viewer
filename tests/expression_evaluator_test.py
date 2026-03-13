@@ -4,7 +4,7 @@ import numpy as np
 
 from viewer.expression import Expression
 from viewer.expression_evaluator import ExpressionEvaluator
-from viewer.expression_node import FunctionCallNode, VariableRefNode
+from viewer.expression_node import FunctionCallNode, NumberNode, VariableRefNode
 from viewer.expression_parser import ExpressionParser
 
 
@@ -200,6 +200,58 @@ class TestExpressionEvaluator(TestCase):
         result = evaluator.evaluate(tree, context)
         # assert
         self.assertEqual(result.unit, "S")
+
+    def test_evaluate_division_scalar_over_siemens_gives_ohms(self):
+        # arrange — dimensionless / S → Ω (e.g. 1 / conductance = resistance)
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        g = Expression("G", np.asarray([0.5, 1.0, 2.0]), "S")
+        context = {"G": g}
+        tree = parser.parse("1 / G")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [2.0, 1.0, 0.5])
+        self.assertEqual(result.unit, "Ω")
+
+    def test_evaluate_division_scalar_over_ohms_gives_siemens(self):
+        # arrange — dimensionless / Ω → S (e.g. 1 / resistance = conductance)
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        r = Expression("R", np.asarray([2.0, 4.0, 8.0]), "Ω")
+        context = {"R": r}
+        tree = parser.parse("1 / R")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [0.5, 0.25, 0.125])
+        self.assertEqual(result.unit, "S")
+
+    def test_evaluate_division_scalar_over_seconds_gives_hz(self):
+        # arrange — dimensionless / s → Hz (e.g. 1 / period = frequency)
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        t = Expression("T", np.asarray([0.001, 0.01, 0.1]), "s")
+        context = {"T": t}
+        tree = parser.parse("1 / T")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [1000.0, 100.0, 10.0])
+        self.assertEqual(result.unit, "Hz")
+
+    def test_evaluate_division_scalar_over_hz_gives_seconds(self):
+        # arrange — dimensionless / Hz → s (e.g. 1 / frequency = period)
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        f = Expression("F", np.asarray([1.0, 10.0, 100.0]), "Hz")
+        context = {"F": f}
+        tree = parser.parse("1 / F")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [1.0, 0.1, 0.01])
+        self.assertEqual(result.unit, "s")
 
     def test_evaluate_division_same_unit_gives_dimensionless(self):
         # arrange — V / V → dimensionless
@@ -488,3 +540,547 @@ class TestExpressionEvaluator(TestCase):
         # assert — 0.125 S × V(speaker) = current in amperes
         np.testing.assert_array_almost_equal(result.data, [1.0, 2.0, 3.0])
         self.assertEqual(result.unit, "A")
+
+    # ------------------------------------------------------------------ #
+    # Inverse trigonometric functions                                      #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_asin_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([0.0, 0.5, 1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("asin(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — unit stripped (returns radians, dimensionless for post-processing)
+        np.testing.assert_array_almost_equal(result.data, np.arcsin([0.0, 0.5, 1.0]))
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_arcsin_alias(self):
+        # arrange — arcsin is the same function as asin
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([0.0, 1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("arcsin(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, np.arcsin([0.0, 1.0]))
+
+    def test_evaluate_acos_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([1.0, 0.0, -1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("acos(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, np.arccos([1.0, 0.0, -1.0]))
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_arccos_alias(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([0.0, 1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("arccos(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, np.arccos([0.0, 1.0]))
+
+    def test_evaluate_atan_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([0.0, 1.0, -1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("atan(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, np.arctan([0.0, 1.0, -1.0]))
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_arctan_alias(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([0.0, 1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("arctan(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, np.arctan([0.0, 1.0]))
+
+    def test_evaluate_asin_edge_boundary_values(self):
+        # arrange — asin(±1) = ±π/2; domain boundary
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([-1.0, 0.0, 1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("asin(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [-np.pi / 2, 0.0, np.pi / 2])
+
+    # ------------------------------------------------------------------ #
+    # Two-argument atan2                                                   #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_atan2_quadrant_values(self):
+        # arrange — atan2(y, x) returns radians in (−π, π]
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vy = Expression("V(y)", np.asarray([1.0, -1.0, 0.0, 1.0]), "V")
+        vx = Expression("V(x)", np.asarray([1.0, 1.0, -1.0, 0.0]), "V")
+        context = {"V(y)": vy, "V(x)": vx}
+        tree = parser.parse("atan2(V(y),V(x))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — dimensionless (radians); no unit propagation for atan2
+        np.testing.assert_array_almost_equal(result.data, np.arctan2([1.0, -1.0, 0.0, 1.0], [1.0, 1.0, -1.0, 0.0]))
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_atan2_wrong_arg_count_raises(self):
+        # arrange — atan2 requires exactly 2 arguments
+        evaluator = ExpressionEvaluator()
+        node = FunctionCallNode("atan2", [VariableRefNode("V(n)")])
+        vn = Expression("V(n)", np.asarray([1.0]), "V")
+        context = {"V(n)": vn}
+        # act / assert
+        with self.assertRaises(ValueError):
+            evaluator.evaluate(node, context)
+
+    # ------------------------------------------------------------------ #
+    # Hyperbolic functions                                                 #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_sinh_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([0.0, 1.0, -1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("sinh(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — unit stripped
+        np.testing.assert_array_almost_equal(result.data, np.sinh([0.0, 1.0, -1.0]))
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_cosh_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([0.0, 1.0, -1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("cosh(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — cosh(0) = 1; cosh is symmetric
+        np.testing.assert_array_almost_equal(result.data, np.cosh([0.0, 1.0, -1.0]))
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_tanh_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([-2.0, 0.0, 2.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("tanh(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — tanh is bounded in (−1, 1)
+        np.testing.assert_array_almost_equal(result.data, np.tanh([-2.0, 0.0, 2.0]))
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_tanh_saturation_edge(self):
+        # arrange — tanh(±large) saturates to ±1
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([-1e6, 1e6]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("tanh(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [-1.0, 1.0], decimal=5)
+
+    # ------------------------------------------------------------------ #
+    # Complex conjugate                                                    #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_conj_complex_variable(self):
+        # arrange — conj preserves both data and unit
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(out)", np.asarray([3+4j, 1-2j]), "V")
+        context = {"V(out)": var}
+        tree = parser.parse("conj(V(out))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [3-4j, 1+2j])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_conj_real_is_identity(self):
+        # arrange — conj of a real array is the array itself
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([1.0, 2.0, 3.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("conj(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [1.0, 2.0, 3.0])
+        self.assertEqual(result.unit, "V")
+
+    # ------------------------------------------------------------------ #
+    # ph / phase (aliases for angle)                                       #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_ph_returns_degrees(self):
+        # arrange — purely imaginary → 90°
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(out)", np.asarray([0+1j, 1+0j, -1+0j]), "V")
+        context = {"V(out)": var}
+        tree = parser.parse("ph(V(out))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [90.0, 0.0, 180.0])
+        self.assertEqual(result.unit, "°")
+
+    def test_evaluate_phase_alias_matches_angle(self):
+        # arrange — phase() must return identical results to angle()
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(out)", np.asarray([1+1j, -1+1j, -1-1j, 1-1j]), "V")
+        context = {"V(out)": var}
+        tree_phase = parser.parse("phase(V(out))")
+        tree_angle = parser.parse("angle(V(out))")
+        # act
+        result_phase = evaluator.evaluate(tree_phase, context)
+        result_angle = evaluator.evaluate(tree_angle, context)
+        # assert
+        np.testing.assert_array_almost_equal(result_phase.data, result_angle.data)
+
+    # ------------------------------------------------------------------ #
+    # sqr(x) = x^2                                                        #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_sqr_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([0.0, 2.0, -3.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("sqr(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — unit stripped (would be V², not tracked)
+        np.testing.assert_array_almost_equal(result.data, [0.0, 4.0, 9.0])
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_sqr_complex_values(self):
+        # arrange — sqr of a complex number is the square, not the magnitude-squared
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(out)", np.asarray([3+4j]), "V")
+        context = {"V(out)": var}
+        tree = parser.parse("sqr(V(out))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — (3+4j)^2 = 9 + 24j − 16 = −7 + 24j
+        np.testing.assert_array_almost_equal(result.data, [(3+4j)**2])
+
+    # ------------------------------------------------------------------ #
+    # sign / sgn                                                           #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_sign_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([-5.0, 0.0, 3.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("sign(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — dimensionless
+        np.testing.assert_array_equal(result.data, [-1.0, 0.0, 1.0])
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_sgn_alias(self):
+        # arrange — sgn is a QSPICE alias for sign
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([-1.0, 0.0, 1.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("sgn(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_equal(result.data, [-1.0, 0.0, 1.0])
+
+    # ------------------------------------------------------------------ #
+    # uramp(x) = max(x, 0)                                                #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_uramp_clips_negative(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([-3.0, 0.0, 2.0, 5.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("uramp(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — negative values become 0; positive values pass through; unit preserved
+        np.testing.assert_array_almost_equal(result.data, [0.0, 0.0, 2.0, 5.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_uramp_all_negative(self):
+        # arrange — edge case: all values below zero → all zeros
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([-1.0, -2.0, -100.0]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("uramp(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [0.0, 0.0, 0.0])
+
+    # ------------------------------------------------------------------ #
+    # Rounding functions                                                   #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_round_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([1.4, 1.5, 2.5, -1.5]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("round(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — numpy uses round-half-to-even; unit preserved
+        np.testing.assert_array_almost_equal(result.data, np.round([1.4, 1.5, 2.5, -1.5]))
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_floor_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([1.9, 2.0, -1.1, -2.9]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("floor(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — floor rounds toward −∞; unit preserved
+        np.testing.assert_array_almost_equal(result.data, [1.0, 2.0, -2.0, -3.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_ceil_real_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([1.1, 2.0, -0.9, -2.1]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("ceil(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — ceil rounds toward +∞; unit preserved
+        np.testing.assert_array_almost_equal(result.data, [2.0, 2.0, 0.0, -2.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_int_truncates_toward_zero(self):
+        # arrange — int(x) truncates toward zero, not toward −∞
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([1.9, -1.9, 2.1, -2.1]), "V")
+        context = {"V(n)": var}
+        tree = parser.parse("int(V(n))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — int(-1.9) = -1, not -2 (unlike floor); unit preserved
+        np.testing.assert_array_almost_equal(result.data, [1.0, -1.0, 2.0, -2.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_int_vs_floor_negative_edge(self):
+        # arrange — key distinction: int rounds toward 0, floor rounds toward −∞
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        var = Expression("V(n)", np.asarray([-0.5, -1.5]), "V")
+        context = {"V(n)": var}
+        tree_int = parser.parse("int(V(n))")
+        tree_floor = parser.parse("floor(V(n))")
+        # act
+        result_int = evaluator.evaluate(tree_int, context)
+        result_floor = evaluator.evaluate(tree_floor, context)
+        # assert — int(-0.5) = 0, floor(-0.5) = -1
+        np.testing.assert_array_almost_equal(result_int.data, [0.0, -1.0])
+        np.testing.assert_array_almost_equal(result_floor.data, [-1.0, -2.0])
+
+    # ------------------------------------------------------------------ #
+    # pow / pwr / pwrs                                                     #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_pow_function(self):
+        # arrange — pow(x, y) = x^y, function form of the ^ operator
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vx = Expression("V(x)", np.asarray([2.0, 3.0, 4.0]), "V")
+        vy = Expression("V(y)", np.asarray([3.0, 2.0, 0.5]), "")
+        context = {"V(x)": vx, "V(y)": vy}
+        tree = parser.parse("pow(V(x),V(y))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — unit stripped for power functions
+        np.testing.assert_array_almost_equal(result.data, [8.0, 9.0, 2.0])
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_pwr_always_non_negative(self):
+        # arrange — pwr(x, y) = |x|^y is always non-negative
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vx = Expression("V(x)", np.asarray([-2.0, -3.0, 2.0]), "V")
+        vy = Expression("V(y)", np.asarray([2.0, 3.0, 2.0]), "")
+        context = {"V(x)": vx, "V(y)": vy}
+        tree = parser.parse("pwr(V(x),V(y))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — pwr(-2, 2) = |-2|^2 = 4; pwr(-3, 3) = |-3|^3 = 27
+        np.testing.assert_array_almost_equal(result.data, [4.0, 27.0, 4.0])
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_pwrs_signed_power(self):
+        # arrange — pwrs(x, y) = sgn(x) * |x|^y preserves sign of x
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vx = Expression("V(x)", np.asarray([-2.0, 3.0, -4.0]), "V")
+        vy = Expression("V(y)", np.asarray([2.0, 2.0, 0.5]), "")
+        context = {"V(x)": vx, "V(y)": vy}
+        tree = parser.parse("pwrs(V(x),V(y))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — pwrs(-2, 2) = -4; pwrs(3, 2) = 9; pwrs(-4, 0.5) = -2
+        np.testing.assert_array_almost_equal(result.data, [-4.0, 9.0, -2.0])
+        self.assertEqual(result.unit, "")
+
+    def test_evaluate_pow_wrong_arg_count_raises(self):
+        # arrange — pow requires exactly 2 arguments
+        evaluator = ExpressionEvaluator()
+        node = FunctionCallNode("pow", [VariableRefNode("V(n)")])
+        vn = Expression("V(n)", np.asarray([1.0]), "V")
+        context = {"V(n)": vn}
+        # act / assert
+        with self.assertRaises(ValueError):
+            evaluator.evaluate(node, context)
+
+    # ------------------------------------------------------------------ #
+    # min / max (two-argument)                                             #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_min_two_signals(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        va = Expression("V(a)", np.asarray([1.0, 5.0, 3.0]), "V")
+        vb = Expression("V(b)", np.asarray([4.0, 2.0, 3.0]), "V")
+        context = {"V(a)": va, "V(b)": vb}
+        tree = parser.parse("min(V(a),V(b))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — element-wise minimum; first arg's unit preserved
+        np.testing.assert_array_almost_equal(result.data, [1.0, 2.0, 3.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_max_two_signals(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        va = Expression("V(a)", np.asarray([1.0, 5.0, 3.0]), "V")
+        vb = Expression("V(b)", np.asarray([4.0, 2.0, 3.0]), "V")
+        context = {"V(a)": va, "V(b)": vb}
+        tree = parser.parse("max(V(a),V(b))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — element-wise maximum; first arg's unit preserved
+        np.testing.assert_array_almost_equal(result.data, [4.0, 5.0, 3.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_min_all_equal(self):
+        # arrange — edge case: all elements equal
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        va = Expression("V(a)", np.asarray([3.0, 3.0, 3.0]), "V")
+        vb = Expression("V(b)", np.asarray([3.0, 3.0, 3.0]), "V")
+        context = {"V(a)": va, "V(b)": vb}
+        tree = parser.parse("min(V(a),V(b))")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert
+        np.testing.assert_array_almost_equal(result.data, [3.0, 3.0, 3.0])
+
+    def test_evaluate_min_wrong_arg_count_raises(self):
+        # arrange — min requires exactly 2 arguments
+        evaluator = ExpressionEvaluator()
+        node = FunctionCallNode("min", [VariableRefNode("V(n)")])
+        vn = Expression("V(n)", np.asarray([1.0]), "V")
+        context = {"V(n)": vn}
+        # act / assert
+        with self.assertRaises(ValueError):
+            evaluator.evaluate(node, context)
+
+    # ------------------------------------------------------------------ #
+    # limit(x, lo, hi)                                                     #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_limit_clamps_values(self):
+        # arrange
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vx = Expression("V(x)", np.asarray([-5.0, 0.0, 3.0, 10.0]), "V")
+        context = {"V(x)": vx}
+        tree = parser.parse("limit(V(x),0,5)")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — clamped to [0, 5]; first arg's unit preserved
+        np.testing.assert_array_almost_equal(result.data, [0.0, 0.0, 3.0, 5.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_limit_all_within_range(self):
+        # arrange — edge case: no clamping needed
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        vx = Expression("V(x)", np.asarray([1.0, 2.0, 3.0]), "V")
+        context = {"V(x)": vx}
+        tree = parser.parse("limit(V(x),0,5)")
+        # act
+        result = evaluator.evaluate(tree, context)
+        # assert — data passes through unchanged
+        np.testing.assert_array_almost_equal(result.data, [1.0, 2.0, 3.0])
+        self.assertEqual(result.unit, "V")
+
+    def test_evaluate_limit_wrong_arg_count_raises(self):
+        # arrange — limit requires exactly 3 arguments
+        evaluator = ExpressionEvaluator()
+        node = FunctionCallNode("limit", [VariableRefNode("V(n)"), NumberNode(0.0)])
+        vn = Expression("V(n)", np.asarray([1.0]), "V")
+        context = {"V(n)": vn}
+        # act / assert
+        with self.assertRaises(ValueError):
+            evaluator.evaluate(node, context)

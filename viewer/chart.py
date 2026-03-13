@@ -135,8 +135,10 @@ class Chart:
                 y_range = max_value - min_value
                 if y_range <= scale * 1e-9:
                     y_range = abs(max_value) * 0.01 if scale != 0 else 1.0
+                # protect against very small ranges
+                delta = max(0.01 * y_range, 1e-3)
                 # store series with min and max values for later use when auto-ranging axes
-                ordinate_series.append((ordinate_variant, y_axis, ordinate_variant_series, min_value - 0.01 * y_range, max_value + 0.01 * y_range))
+                ordinate_series.append((ordinate_variant, y_axis, ordinate_variant_series, min_value - delta, max_value + delta))
             # store reference to allow removal later
             self._series[ordinate.name] = (ordinate, ordinate_series)
         # add/remove series from chart
@@ -335,8 +337,10 @@ class Chart:
                     y_range = max_value - min_value
                     if y_range <= scale * 1e-9:
                         y_range = abs(max_value) * 0.01 if scale != 0 else 1.0
+                    # protect against very small ranges
+                    delta = max(0.01 * y_range, 1e-3)
                     # append to list for later update of the series data and axis ranges after the loop
-                    new_ordinate_series.append((ordinate_variant, y_axis, series_list, min_value - 0.01 * y_range, max_value + 0.01 * y_range))
+                    new_ordinate_series.append((ordinate_variant, y_axis, series_list, min_value - delta, max_value + delta))
                 # replace the list contents in-place
                 ordinate_series[:] = new_ordinate_series
         finally:

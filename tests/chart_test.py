@@ -1,6 +1,6 @@
 import sys
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -337,3 +337,356 @@ class TestChart(TestCase):
         result = chart.abscissa
         # assert
         self.assertIs(result, abscissa)
+
+    def test_render_initializes_component_with_abscissa_range(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 10.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 100, 1, 500)
+        # act
+        chart.render("Time", "linear", set())
+        # assert — initialize must receive label, unit, scale, and exact boundary values
+        component.initialize.assert_called_once_with("Time", "s", "linear", float(values[0]), float(values[99]))
+
+    def test_render_calls_auto_range_after_plot_series(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 10.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 100, 1, 500)
+        # act
+        with patch.object(chart, "auto_range") as mock_auto_range:
+            chart.render("Time", "linear", set())
+        # assert
+        mock_auto_range.assert_called_once()
+
+    def test_plot_series_adds_expression_to_series_dict(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        decimated_x = np.linspace(0.0, 1.0, 10)
+        decimated_y = np.linspace(0.0, 5.0, 10)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(decimated_x, decimated_y)):
+            chart.plot_series({vout})
+        # assert
+        self.assertIn("Vout", chart._series)
+
+    def test_plot_series_stores_expression_in_expressions_list(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        decimated_x = np.linspace(0.0, 1.0, 10)
+        decimated_y = np.linspace(0.0, 5.0, 10)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(decimated_x, decimated_y)):
+            chart.plot_series({vout})
+        # assert
+        self.assertIn(vout, chart.expressions)
+
+    def test_plot_series_calls_component_plot_series(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        decimated_x = np.linspace(0.0, 1.0, 10)
+        decimated_y = np.linspace(0.0, 5.0, 10)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(decimated_x, decimated_y)):
+            chart.plot_series({vout})
+        # assert
+        component.plotSeries.assert_called_once()
+
+    def test_plot_series_skips_already_tracked_expression(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        # inject existing series entry so chart believes Vout is already plotted
+        chart._series["Vout"] = (vout, [])
+        chart._expressions.append(vout)
+        # act
+        chart.plot_series({vout})
+        # assert — no new axis was requested because no new series were created
+        component.createYAxis.assert_not_called()
+
+    def test_plot_series_removes_expression_absent_from_new_set(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        # inject an existing series that is absent from the new expression set
+        chart._series["Vout"] = (vout, [(vout, MagicMock(), [MagicMock()], 0.0, 5.0)])
+        chart._expressions.append(vout)
+        # act — empty set means all existing series should be removed
+        chart.plot_series(set())
+        # assert
+        self.assertNotIn("Vout", chart._series)
+        self.assertNotIn(vout, chart.expressions)
+        component.plotSeries.assert_called_once()
+
+    def test_plot_series_creates_one_series_entry_per_step(self):
+        # arrange
+        component = MagicMock()
+        n = 10
+        values = np.linspace(0.0, 1.0, n)
+        abscissa = Expression("Time", values, "s")
+        # two steps: 20 ordinate points total (10 per step)
+        ordinate_data = np.linspace(0.0, 5.0, 2 * n)
+        chart = Chart(component, MagicMock(), abscissa, 0, n, 2, 500)
+        vout = Expression("Vout", ordinate_data, "V")
+        decimated_y = np.linspace(0.0, 5.0, n)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
+            chart.plot_series({vout})
+        # assert — one QLineSeries created per step
+        _, ordinate_series = chart._series["Vout"]
+        _, _, series_list, _, _ = ordinate_series[0]
+        self.assertEqual(len(series_list), 2)
+
+    def test_get_expressions_to_plot_real_returns_single_entry(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        # act
+        result = chart._get_expressions_to_plot(vout)
+        # assert — real expression returned as-is in a single-element list
+        self.assertEqual(result, [vout])
+
+    def test_get_expressions_to_plot_complex_returns_magnitude_and_phase(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        mock_manager = MagicMock()
+        magnitude_expr = Expression("abs(Vout)", np.ones(10), "V")
+        phase_expr = Expression("angle(Vout)", np.zeros(10), "deg")
+        mock_manager.evaluate.side_effect = lambda expr: magnitude_expr if "abs" in expr else phase_expr
+        chart = Chart(component, mock_manager, abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.ones(10, dtype=np.complex128), "V")
+        # act
+        result = chart._get_expressions_to_plot(vout)
+        # assert — complex expression splits into magnitude then phase
+        self.assertEqual(len(result), 2)
+        self.assertIs(result[0], magnitude_expr)
+        self.assertIs(result[1], phase_expr)
+
+    def test_get_expressions_to_plot_complex_returns_empty_when_magnitude_fails(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        mock_manager = MagicMock()
+        # evaluate always returns None — magnitude lookup fails immediately
+        mock_manager.evaluate.return_value = None
+        chart = Chart(component, mock_manager, abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.ones(10, dtype=np.complex128), "V")
+        # act
+        result = chart._get_expressions_to_plot(vout)
+        # assert
+        self.assertEqual(result, [])
+
+    def test_get_expressions_to_plot_complex_returns_empty_when_phase_fails(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        mock_manager = MagicMock()
+        magnitude_expr = Expression("abs(Vout)", np.ones(10), "V")
+        # magnitude succeeds but phase lookup fails
+        mock_manager.evaluate.side_effect = lambda expr: magnitude_expr if "abs" in expr else None
+        chart = Chart(component, mock_manager, abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.ones(10, dtype=np.complex128), "V")
+        # act
+        result = chart._get_expressions_to_plot(vout)
+        # assert
+        self.assertEqual(result, [])
+
+    def test_redraw_all_series_calls_resize_abscissa(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 10.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        mock_series = MagicMock()
+        chart._series["Vout"] = (vout, [(vout, MagicMock(), [mock_series], 0.0, 5.0)])
+        decimated_y = np.linspace(0.0, 5.0, 10)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
+            chart._redraw_all_series()
+        # assert — abscissa axis resized to match the current zoom window bounds
+        component.resizeAbscissa.assert_called_once_with(float(values[0]), float(values[-1]))
+
+    def test_redraw_all_series_calls_replace_np_on_each_series(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 10.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        mock_series = MagicMock()
+        chart._series["Vout"] = (vout, [(vout, MagicMock(), [mock_series], 0.0, 5.0)])
+        x_out = np.linspace(0.0, 10.0, 10)
+        y_out = np.linspace(0.0, 5.0, 10)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(x_out, y_out)):
+            chart._redraw_all_series()
+        # assert — series data updated with newly decimated arrays
+        mock_series.replaceNp.assert_called_once()
+
+    def test_update_zoom_window_horizontal_calls_redraw_all_series(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 100, 1, 500)
+        # act
+        with patch.object(chart, "_redraw_all_series") as mock_redraw:
+            chart.update_zoom_window(10, 80, None, None)
+        # assert
+        mock_redraw.assert_called_once()
+
+    def test_update_zoom_window_both_calls_redraw_and_auto_range(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 100, 1, 500)
+        # act — both horizontal and vertical changes supplied simultaneously
+        with patch.object(chart, "_redraw_all_series") as mock_redraw:
+            with patch.object(chart, "auto_range") as mock_auto_range:
+                chart.update_zoom_window(10, 80, 0.25, 0.75)
+        # assert
+        mock_redraw.assert_called_once()
+        mock_auto_range.assert_called_once()
+
+    def test_update_zoom_window_vertical_only_updates_axis_ranges(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 100, 1, 500)
+        mock_y_axis = MagicMock()
+        # inject known axis range so the zoom calculation is predictable
+        chart._axis_ranges = {mock_y_axis: (0.0, 10.0)}
+        # act — select bottom half (ratios 0.5 → 1.0)
+        chart.update_zoom_window(-1, -1, 0.5, 1.0)
+        # assert — setRange called with 0+0.5*10=5.0 and 0+1.0*10=10.0
+        mock_y_axis.setRange.assert_called_once_with(5.0, 10.0)
+
+    def test_reset_zoom_window_vertical_changed_updates_axis_ranges(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 100, 1, 500)
+        mock_y_axis = MagicMock()
+        chart._axis_ranges = {mock_y_axis: (0.0, 10.0)}
+        # act — reset to ratios different from the default (0.0, 1.0) triggers axis update
+        chart.reset_zoom_window(-1, -1, 0.3, 0.7)
+        # assert — setRange called with raw stored min/max values
+        mock_y_axis.setRange.assert_called_once_with(0.0, 10.0)
+
+    def test_reset_zoom_window_no_axis_update_when_vertical_unchanged(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 100, 1, 500)
+        mock_y_axis = MagicMock()
+        chart._axis_ranges = {mock_y_axis: (0.0, 10.0)}
+        # act — same ratios already stored — no change detected
+        chart.reset_zoom_window(-1, -1, 0.0, 1.0)
+        # assert — setRange must not be called when vertical zoom did not change
+        mock_y_axis.setRange.assert_not_called()
+
+    def test_plot_series_handles_constant_nonzero_signal(self):
+        # arrange — all ordinate values equal and non-zero: y_range is zero but scale != 0
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.full(10, 3.0), "V")
+        decimated_y = np.full(10, 3.0)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
+            chart.plot_series({vout})
+        # assert — series stored without raising; padded bounds surround the constant value
+        self.assertIn("Vout", chart._series)
+        _, ordinate_series = chart._series["Vout"]
+        _, _, _, stored_min, stored_max = ordinate_series[0]
+        self.assertLess(stored_min, 3.0)
+        self.assertGreater(stored_max, 3.0)
+
+    def test_plot_series_handles_all_zero_signal(self):
+        # arrange — all ordinate values are zero: scale == 0 triggers the else branch (y_range = 1.0)
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.zeros(10), "V")
+        decimated_y = np.zeros(10)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
+            chart.plot_series({vout})
+        # assert — series stored; padded bounds extend below and above zero
+        self.assertIn("Vout", chart._series)
+        _, ordinate_series = chart._series["Vout"]
+        _, _, _, stored_min, stored_max = ordinate_series[0]
+        self.assertLess(stored_min, 0.0)
+        self.assertGreater(stored_max, 0.0)
+
+    def test_redraw_all_series_handles_constant_signal(self):
+        # arrange — constant ordinate so the flat-signal y_range fix fires inside _redraw_all_series
+        component = MagicMock()
+        values = np.linspace(0.0, 10.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.full(10, 7.0), "V")
+        mock_series = MagicMock()
+        chart._series["Vout"] = (vout, [(vout, MagicMock(), [mock_series], 7.0, 7.0)])
+        decimated_y = np.full(10, 7.0)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
+            chart._redraw_all_series()
+        # assert — replaceNp called and resizeAbscissa completed without exception
+        mock_series.replaceNp.assert_called_once()
+        component.resizeAbscissa.assert_called_once()
+
+    def test_plot_series_skips_expression_when_y_axis_limit_reached(self):
+        # arrange — fill up all four Y axis slots before calling plot_series
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, MagicMock(), abscissa, 0, 10, 1, 500)
+        # occupy all four axis slots so the fifth unit returns None from _get_y_axis
+        chart._get_y_axis("V")
+        chart._get_y_axis("A")
+        chart._get_y_axis("W")
+        chart._get_y_axis("s")
+        # fifth expression has a new unit: _get_y_axis will return None
+        fifth = Expression("E5", np.linspace(0.0, 1.0, 10), "Hz")
+        decimated_y = np.linspace(0.0, 1.0, 10)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
+            chart.plot_series({fifth})
+        # assert — expression tracked in _series but its ordinate_series list is empty
+        _, ordinate_series = chart._series["E5"]
+        self.assertEqual(ordinate_series, [])
