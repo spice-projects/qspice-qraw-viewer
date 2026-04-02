@@ -8,7 +8,7 @@ QSPICE QRAW Waveform Viewer — a PySide6/QML desktop app that parses binary `.q
 
 ```bash
 # Install dependencies
-pip install numpy "PySide6>=6.7"
+pip install numpy "PySide6>=6.11"
 
 # Run the app
 python -m viewer <file.qraw>

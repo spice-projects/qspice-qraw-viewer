@@ -480,8 +480,8 @@ Item {
             // unit and scale
             graphsView.xUnit = axisXUnit
             graphsView.xScale = axisXScale
-            // tick interval
-            axisX.tickInterval = (axisXMaxValue - axisXMinValue) / 10
+            // one tick per decade/octave in log space; ten equal ticks for linear
+            axisX.tickInterval = (axisXScale === "lin") ? (axisXMaxValue - axisXMinValue) / 10 : 1.0
             // set X range
             axisX.min = axisXMinValue
             axisX.max = axisXMaxValue
@@ -491,8 +491,8 @@ Item {
             // update X axis range after a zoom operation
             axisX.min = axisXMinValue
             axisX.max = axisXMaxValue
-            // interval
-            axisX.tickInterval = (axisXMaxValue - axisXMinValue) / 10
+            // one tick per decade/octave in log space; ten equal ticks for linear
+            axisX.tickInterval = (graphsView.xScale === "lin") ? (axisXMaxValue - axisXMinValue) / 10 : 1.0
         }
 
         function createYAxis(title, unit) {

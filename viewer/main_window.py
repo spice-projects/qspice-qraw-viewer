@@ -153,6 +153,9 @@ class MainWindow(QMainWindow):
         self._root.pointerExited.connect(self._on_pointer_exited)
         # populate charts after the event loop starts so the window is visible first
         QTimer.singleShot(0, self._populate_charts)
+        # log screen information for debugging purposes
+        if logger.isEnabledFor(logging.DEBUG):
+            QTimer.singleShot(0, self._log_screen_info)
 
     def _create_main_menu(self):
         # menu bar
@@ -208,6 +211,16 @@ class MainWindow(QMainWindow):
         for suggestion in self._plot_suggestions:
             # append chart using the type encoded in the suggestion
             self._add_chart(suggestion.expressions)
+
+    def _log_screen_info(self):
+        # screen reference
+        screen = self.screen()
+        # log information
+        logger.debug("Screen information:")
+        logger.debug("Screen name: %s", screen.name())
+        logger.debug("Screen size: %d x %d", screen.size().width(), screen.size().height())
+        logger.debug("Device pixel ratio: %f", screen.devicePixelRatio())
+        logger.debug("Refresh rate: %f", screen.refreshRate())
 
     def _add_chart(self, expressions: list[Expression]):
         # chart index
