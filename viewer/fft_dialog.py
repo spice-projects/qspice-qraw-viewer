@@ -162,6 +162,7 @@ class FftDialog(QDialog):
             # use the full abscissa range
             self._result_from_index = 0
             self._result_to_index = total
+        # proceed to accept the dialog and close it
         self.accept()
 
     @property

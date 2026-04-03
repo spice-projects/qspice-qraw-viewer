@@ -84,10 +84,12 @@ class MainWindow(QMainWindow):
 
     def __init__(self, qraw_file: QRawFile, source_qraw_path: Path | None = None):
         super().__init__()
+        # load and set the application icon
         icon = load_app_icon()
         if not icon.isNull():
             self.setWindowIcon(icon)
         # extract information from file
+        self._default_chart_type = qraw_file.chart_type
         self._abscissa = qraw_file.abscissa
         self._abscissa_scale = qraw_file.abscissa_scale
         self._expression_manager = qraw_file.expression_manager
@@ -204,13 +206,13 @@ class MainWindow(QMainWindow):
         # fall back to one empty chart when there are none
         if not self._plot_suggestions:
             # add a single chart with the default type for this file, but no series (empty)
-            self._add_chart([])
+            self._add_chart(self._default_chart_type, [])
             # exit
             return
         # loop suggestions — each suggestion carries its own chart type
         for suggestion in self._plot_suggestions:
             # append chart using the type encoded in the suggestion
-            self._add_chart(suggestion.expressions)
+            self._add_chart(suggestion.chart_type, suggestion.expressions)
 
     def _log_screen_info(self):
         # screen reference
@@ -222,7 +224,7 @@ class MainWindow(QMainWindow):
         logger.debug("Device pixel ratio: %f", screen.devicePixelRatio())
         logger.debug("Refresh rate: %f", screen.refreshRate())
 
-    def _add_chart(self, expressions: list[Expression]):
+    def _add_chart(self, chart_type: str, expressions: list[Expression]):
         # chart index
         chart_index = len(self._charts)
         # create chart ui component in QML
@@ -230,7 +232,7 @@ class MainWindow(QMainWindow):
         # get a reference to the chart's QML object so we can manipulate it
         chart_root = self._root.getChart(chart_index)
         # create chart instance
-        chart = Chart(chart_root, self._expression_manager, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self._steps, self._decimate_target)
+        chart = Chart(chart_root, chart_type, self._expression_manager, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self._steps, self._decimate_target)
         # add it to the list of charts so we can keep track of it
         self._charts.append(chart)
         # render chart
@@ -360,7 +362,7 @@ class MainWindow(QMainWindow):
         # log information
         logger.debug("User requested adding a new window at index: %d", chart_index)
         # add a new chart with no pre-populated expressions
-        self._add_chart([])
+        self._add_chart(self._default_chart_type, [])
 
     @Slot(int)
     def _on_menu_delete_window(self, chart_index: int):
@@ -396,8 +398,6 @@ class MainWindow(QMainWindow):
         normalize = dialog.result_normalize
         keep_dc = dialog.result_keep_dc
         output = dialog.result_output
-        # determine unit based on FFT output type
-        fft_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else "V")
         # number of samples per step (abscissa is already trimmed to one period)
         step_points = len(self._abscissa.data)
         # shared abscissa slice for all selected expressions
@@ -418,14 +418,14 @@ class MainWindow(QMainWindow):
             logger.error("FFT computation returned an empty frequency axis for chart %d", chart_index)
             # exit
             return
-        # build FFT expressions preserving the selected input order
-        fft_expressions = [Expression(f"FFT({expression.name})", fft_values, fft_unit) for expression, fft_values in zip(result_expressions, fft_matrix)]
+        # build FFT expressions preserving the selected input order (strip spaces from expression name, it is required for plot suggestions to work correctly in the new window)
+        fft_expressions = [Expression(f"FFT({expression.name.replace(' ', '')})", fft_values, "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else expression.unit)) for expression, fft_values in zip(result_expressions, fft_matrix)]
         # create frequency expression for the shared abscissa
         freq_expression = Expression("Frequency", frequencies, "Hz")
         # build expression manager with frequency abscissa and all FFT results
         expression_manager = ExpressionManager([freq_expression] + fft_expressions)
         # build one «name» group per FFT expression so each gets its own chart
-        plot_suggestion = " ".join(f"\xab{e.name}\xbb" for e in fft_expressions)
+        plot_suggestion = " ".join(f"\xabfft {e.name}\xbb" for e in fft_expressions)
         # create a synthetic QRawFile with frequency abscissa and all FFT values
         fft_qraw = QRawFile(filename=Path(f"fft_{result_expressions[0].name}.qraw"), title=f"FFT \u2013 {', '.join(e.name for e in result_expressions)}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=plot_suggestion, expression_manager=expression_manager)
         # create a new MainWindow to render the FFT result using the existing infrastructure;

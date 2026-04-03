@@ -86,17 +86,9 @@ _MODE_TO_CHART: dict[str, str] = {
     "dc": "DC",
     "op": "DC",
     "noise": "AC",
+    # custom, not part of the QRAW specification
+    "fft": "FFT"
 }
-
-
-def _chart_type_for_file(abscissa: Expression) -> str:
-    # type unambiguously determines the chart layout
-    if abscissa.unit == "Hz":
-        return "AC"
-    if abscissa.unit == "s":
-        return "TRANSIENT"
-    # VOLTAGE (DC transfer sweep) and PARAMETER (operating point sweep) both use the DC layout
-    return "DC"
 
 
 class QRawFile:
@@ -153,6 +145,16 @@ class QRawFile:
         return self._abscissa_scale
 
     @property
+    def chart_type(self) -> str:
+        # type unambiguously determines the chart layout
+        if self._abscissa.unit == "Hz":
+            return "AC"
+        if self._abscissa.unit == "s":
+            return "TRANSIENT"
+        # VOLTAGE (DC transfer sweep) and PARAMETER (operating point sweep) both use the DC layout
+        return "DC"
+
+    @property
     def command(self) -> str:
         return self._command
 
@@ -167,7 +169,7 @@ class QRawFile:
         # calculate plot suggestions
         if self._plot_suggestions is None:
             # file chart type
-            file_chart_type = _chart_type_for_file(self._abscissa)
+            file_chart_type = self.chart_type
             # plot suggestions
             self._plot_suggestions = []
             # extract each «...» group in order, ``\xab``/``\xbb`` are the «» characters; using a raw string avoids accidental escaping.

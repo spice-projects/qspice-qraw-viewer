@@ -1,8 +1,8 @@
 import logging
 
 import numpy as np
-from PySide6.QtCore import QTimer
-from PySide6.QtGraphs import QAbstractAxis, QLineSeries
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGraphs import QAbstractAxis, QLineSeries, QValueAxis
 from PySide6.QtQuick import QQuickItem
 
 from .decimation_algorithm import DecimationAlgorithm, decimate_xy
@@ -17,9 +17,11 @@ _DECIMATION_ALGORITHM = DecimationAlgorithm.M4
 
 class Chart:
 
-    def __init__(self, component: QQuickItem, expression_manager: ExpressionManager, abscissa: Expression, abscissa_from_index: int, abscissa_to_index: int, steps: int, decimate_target: int):
+    def __init__(self, component: QQuickItem, char_type: str, expression_manager: ExpressionManager, abscissa: Expression, abscissa_from_index: int, abscissa_to_index: int, steps: int, decimate_target: int):
         # store component
         self._component = component
+        # store chart type
+        self._chart_type = char_type
         # store expression manager
         self._expression_manager = expression_manager
         # store variables
@@ -34,10 +36,16 @@ class Chart:
         self._decimate_target = decimate_target
         # track active series
         self._series: dict[str, tuple[Expression, list[tuple[Expression, QAbstractAxis, list[QLineSeries], float, float]]]] = {}
-        # track Y axis usage
+        # axis tracking for measurement types, e.g. {"V": <QAbstractAxis>, "I": <QAbstractAxis>}
         self._y_axes: dict[str, QAbstractAxis] = {}
+        self._y_axes_ref_counts: dict[QAbstractAxis, int] = {}
         # axis ranges
         self._axis_ranges: dict[QAbstractAxis, tuple[float, float]] = {}
+        # y axes instances
+        self._left_y_axis_1: QAbstractAxis | None = None
+        self._right_y_axis_1: QAbstractAxis | None = None
+        self._left_y_axis_2: QAbstractAxis | None = None
+        self._right_y_axis_2: QAbstractAxis | None = None
 
     @property
     def expressions(self) -> list[Expression]:
@@ -67,6 +75,8 @@ class Chart:
         series_to_remove: list[tuple[str, list[QLineSeries]]] = []
         # labels to remove from the chart
         labels_to_remove: list[str] = []
+        # axis to remove
+        axes_to_remove: list[QAbstractAxis] = []
         # loop existing series to find those that need to be removed (those whose expression is not in the new expressions list)
         for label, (expression, ordinate_series) in self._series.items():
             # check expression should be removed
@@ -76,7 +86,11 @@ class Chart:
                 # remove from expressions
                 self._expressions.remove(expression)
                 # enqueue series for removal
-                for ordinate_variant, _, series_list, _, _ in ordinate_series:
+                for ordinate_variant, axis, series_list, _, _ in ordinate_series:
+                    # release axis if no longer in use
+                    if self._release_y_axis(axis):
+                        axes_to_remove.append(axis)
+                    # append to list for later removal from chart
                     series_to_remove.append([ordinate_variant.name, series_list])
                 # remove from tracked series so we don't try to update it later
                 labels_to_remove.append(label)
@@ -142,9 +156,9 @@ class Chart:
             # store reference to allow removal later
             self._series[ordinate.name] = (ordinate, ordinate_series)
         # add/remove series from chart
-        self._component.plotSeries(series_to_render, series_to_remove)
+        self._component.updateGraphsView(series_to_render, series_to_remove)
         # release stash after Qt finishes its async processing
-        QTimer.singleShot(2000, lambda: (series_to_remove.clear()))
+        QTimer.singleShot(2000, lambda: (series_to_remove.clear(), axes_to_remove.clear()))
 
     def auto_range(self):
         # skip if no series are currently plotted
@@ -226,19 +240,20 @@ class Chart:
 
     def clear(self):
         # Qt enqueues the visual removal of series asynchronously. Python owns the QLineSeries, so we must NOT let Python GC them until Qt has finished processing the removal queue.
+        old_y_axes = self._y_axes
         old_series = self._series
-        old_axes = self._y_axes
         old_expressions = self._expressions
         # reset internal state
         self._series = {}
         self._y_axes = {}
+        self._y_axes_ref_counts = {}
         self._expressions = []
         # reset zoom window (vertical axes only, keep horizontal range)
         self._zoom_window = (self._zoom_window[0], 0.0, self._zoom_window[2], 1.0)
         # enqueue Qt-side removal
         self._component.removeAllSeries()
         # release stash after Qt finishes its async processing
-        QTimer.singleShot(1000, lambda: (old_series.clear(), old_axes.clear(), old_expressions.clear()))
+        QTimer.singleShot(1000, lambda: (old_series.clear(), old_y_axes.clear(), old_expressions.clear()))
 
     def sample_at(self, x_ratio: float) -> list[tuple[str, str, list[float]]]:
         # check series are plotted
@@ -269,35 +284,28 @@ class Chart:
         # check we can plot expression as is
         if not expression.complex:
             return [expression]
-        # magniture
-        magnitude_expression = self._expression_manager.evaluate(f"abs({expression.name})")
-        if not magnitude_expression:
-            return []
-        # phase
-        phase_expression = self._expression_manager.evaluate(f"angle({expression.name})")
-        if not phase_expression:
-            return []
-        # exit
-        return [magnitude_expression, phase_expression]
-
-    def _get_y_axis(self, unit: str) -> QAbstractAxis | None:
-        # existing axis for measurement type
-        axis = self._y_axes.get(unit)
-        if axis is not None:
-            return axis
-        # log information
-        logger.debug("Reserving Y axis [%d] for measurement type: %s", len(self._y_axes), unit)
-        # number of y axis in use
-        counter = len(self._y_axes)
-        # check we have reached the maximum number of Y axes allowed by this chart type
-        if counter == 4:
-            return None
-        # create axis
-        axis = self._component.createYAxis(f"Y Axis {counter + 1}", unit)
-        # reserve axis for this measurement type
-        self._y_axes[unit] = axis
-        # exit
-        return axis
+        # check chart type
+        if self._chart_type == "AC":
+            # dB conversion multiplier (V, A, W)
+            multiplier = 20 if (expression.unit == "V" or expression.unit == "A") else 10 if expression.unit == "W" else 1
+            # check expression is non-zero to avoid issues with log(0) when calculating magnitude
+            if np.all(np.abs(expression.data) <= 1e-12):
+                # phase
+                phase_expression = self._expression_manager.evaluate(f"angle({expression.name})", f"Angle({expression.name})")
+                if not phase_expression:
+                    return []
+                # exit with phase only
+                return [phase_expression]
+            # magnitude
+            magnitude_expression = self._expression_manager.evaluate(f"{multiplier}*log(abs({expression.name}))", f"Abs({expression.name})")
+            if not magnitude_expression:
+                return []
+            # phase
+            phase_expression = self._expression_manager.evaluate(f"angle({expression.name})", f"Angle({expression.name})")
+            if not phase_expression:
+                return []
+            # exit
+            return [magnitude_expression, phase_expression]
 
     def _redraw_all_series(self):
         # abscissa values — shared across all ordinate steps, will be paired with y below
@@ -346,3 +354,69 @@ class Chart:
         finally:
             # resize abscissa axis
             self._component.resizeAbscissa(abscissa_min, abscissa_max)
+
+    def _get_y_axis(self, unit: str) -> QAbstractAxis | None:
+        # existing axis for measurement type
+        axis = self._y_axes.get(unit)
+        if axis is not None:
+            # increase reference count for this axis
+            self._y_axes_ref_counts[axis] += 1
+            # use axis
+            return axis
+        # log information
+        logger.debug("Creating Y axis for measurement type: %s", unit or "<no unit>")
+        # left (main)
+        if self._left_y_axis_1 is None:
+            # create axis
+            self._left_y_axis_1 = self._component.createYAxis(Qt.AlignmentFlag.AlignLeft, unit, True)
+            # register axis
+            self._y_axes[unit] = self._left_y_axis_1
+            self._y_axes_ref_counts[self._left_y_axis_1] = 1
+            # use axis
+            return self._left_y_axis_1
+        # right (main)
+        if self._right_y_axis_1 is None:
+            # create axis
+            self._right_y_axis_1 = self._component.createYAxis(Qt.AlignmentFlag.AlignRight, unit, False)
+            # register axis
+            self._y_axes[unit] = self._right_y_axis_1
+            self._y_axes_ref_counts[self._right_y_axis_1] = 1
+            # use axis
+            return self._right_y_axis_1
+        # left (secondary)
+        if self._left_y_axis_2 is None:
+            # create axis
+            self._left_y_axis_2 = self._component.createYAxis(Qt.AlignmentFlag.AlignLeft, unit, False)
+            # register axis
+            self._y_axes[unit] = self._left_y_axis_2
+            self._y_axes_ref_counts[self._left_y_axis_2] = 1
+            # use axis
+            return self._left_y_axis_2
+        # right (secondary)
+        if self._right_y_axis_2 is None:
+            # create axis
+            self._right_y_axis_2 = self._component.createYAxis(Qt.AlignmentFlag.AlignRight, unit, False)
+            # register axis
+            self._y_axes[unit] = self._right_y_axis_2
+            self._y_axes_ref_counts[self._right_y_axis_2] = 1
+            # use axis
+            return self._right_y_axis_2
+        # no more axes available
+        return None
+
+    def _release_y_axis(self, axis: QAbstractAxis) -> bool:
+        # decrease reference count for this axis
+        self._y_axes_ref_counts[axis] -= 1
+        # check if axis is now unused and can be released
+        if self._y_axes_ref_counts[axis] == 0:
+            # unit
+            unit = axis.property("yUnit")
+            # log information
+            logger.debug("Releasing Y axis for measurement type: %s", unit or "<no unit>")
+            # remove from tracked axes
+            del self._y_axes_ref_counts[axis]
+            del self._y_axes[unit]
+            # remove from chart
+            return True
+        # exit
+        return False

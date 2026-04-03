@@ -6,7 +6,7 @@ from collections.abc import Callable
 import numpy as np
 
 from .expression import Expression
-from .expression_node import BinaryOp, BinaryOpNode, ExprNode, FunctionCallNode, NumberNode, UnaryOp, UnaryOpNode, VariableRefNode
+from .expression_node import BinaryOperator, BinaryOperatorNode, ExpressionNode, FunctionCallNode, NumberNode, UnaryOperator, UnaryOperatorNode, VariableRefNode
 
 # maps lower-cased function name to a callable that accepts an ndarray and
 # returns an ndarray; all functions must handle complex inputs gracefully
@@ -97,13 +97,13 @@ _CONSTANTS: dict[str, tuple[float, str]] = {
 }
 
 
-def _propagate_binary_unit(left_unit: str, op: BinaryOp, right_unit: str) -> str:
+def _propagate_binary_unit(left_unit: str, op: BinaryOperator, right_unit: str) -> str:
     # +, -
-    if op in (BinaryOp.ADD, BinaryOp.SUB):
+    if op in (BinaryOperator.ADD, BinaryOperator.SUB):
         # units must be identical for addition/subtraction
         return left_unit if left_unit == right_unit else ""
     # *
-    if op == BinaryOp.MUL:
+    if op == BinaryOperator.MUL:
         # W = V × A
         if {left_unit, right_unit} == {"V", "A"}:
             return "W"
@@ -117,7 +117,7 @@ def _propagate_binary_unit(left_unit: str, op: BinaryOp, right_unit: str) -> str
         # left unit if any
         return left_unit
     # /
-    if op == BinaryOp.DIV:
+    if op == BinaryOperator.DIV:
         # unit / unit = dimensionless ratio
         if left_unit == right_unit:
             return ""
@@ -196,7 +196,7 @@ class ExpressionEvaluator:
         # result.unit == "Ω"
     """
 
-    def evaluate(self, node: ExprNode, context: dict[str, Expression], name: str | None = None, source: str | None = None) -> Expression:
+    def evaluate(self, node: ExpressionNode, context: dict[str, Expression], name: str | None = None, source: str | None = None) -> Expression:
         """Evaluate *node* against *context* and return an :class:`~viewer.expression.Expression`.
 
         :param node:    Root AST node returned by :class:`~viewer.expression_parser.ExpressionParser`.
@@ -212,27 +212,31 @@ class ExpressionEvaluator:
         # evaluate the AST and propagate units
         data, unit = self._eval(node, context)
         # use the provided name or reconstruct one from the AST
-        expr_name = name if name is not None else self._node_to_str(node)
+        expr_name = name if name is not None else str(node)
         # exit
         return Expression(expr_name, data, unit, source=source if source is not None else expr_name)
 
-    def _eval(self, node: ExprNode, context: dict[str, Expression]) -> tuple[np.ndarray, str]:
+    def _eval(self, node: ExpressionNode, context: dict[str, Expression]) -> tuple[np.ndarray, str]:
         """Recursively evaluate *node*, returning ``(data_array, unit_string)``."""
         # number literal evaluates to a scalar array with empty unit
         if isinstance(node, NumberNode):
             return np.array(node.value), ""
-        # variable reference: check built-in constants first (pi, mho), then look up in context;
         # built-in constants shadow any simulation variable with the same name (case-insensitive)
         if isinstance(node, VariableRefNode):
+            # check built-in constants first (pi, mho)
             entry = _CONSTANTS.get(node.name.lower())
             if entry is not None:
+                # entry is a (value, unit) pair, e.g. (3.14159..., "") for pi or (1.0, "S") for mho
                 const_value, const_unit = entry
-                return np.array(const_value), const_unit
-            # try direct lookup first (handles variables whose name already includes the probe syntax)
+                # exit
+                return np.array(const_value), const_unit            
             try:
+                # lookup variable in context
                 var = self._lookup(node.name, context)
+                # exit
                 return var.data, var.unit
             except ValueError:
+                # not exists in context
                 pass
             # two-node differential form: FUNC(a, b) = FUNC(a) - FUNC(b) per SPICE convention;
             # node "0" is the SPICE ground reference and is never stored as a variable (it is
@@ -255,16 +259,16 @@ class ExpressionEvaluator:
         if isinstance(node, FunctionCallNode):
             return self._eval_function(node, context)
         # binary operation: evaluate both sides, apply the operator, and propagate units
-        if isinstance(node, BinaryOpNode):
+        if isinstance(node, BinaryOperatorNode):
             left_data, left_unit = self._eval(node.left, context)
             right_data, right_unit = self._eval(node.right, context)
             data = self._apply_binary_op(node.op, left_data, right_data)
             unit = _propagate_binary_unit(left_unit, node.op, right_unit)
             return data, unit
         # unary operation: evaluate the operand and apply the unary operator
-        if isinstance(node, UnaryOpNode):
+        if isinstance(node, UnaryOperatorNode):
             data, unit = self._eval(node.operand, context)
-            if node.op == UnaryOp.NEG:
+            if node.op == UnaryOperator.NEG:
                 return -data, unit
             raise ValueError(f"unsupported unary operator: {node.op}")
         raise ValueError(f"unknown AST node type: {type(node).__name__}")
@@ -305,16 +309,16 @@ class ExpressionEvaluator:
         raise ValueError(f"unknown function: {node.name!r}")
 
     @staticmethod
-    def _apply_binary_op(op: BinaryOp, left: np.ndarray, right: np.ndarray) -> np.ndarray:
-        if op == BinaryOp.ADD:
+    def _apply_binary_op(op: BinaryOperator, left: np.ndarray, right: np.ndarray) -> np.ndarray:
+        if op == BinaryOperator.ADD:
             return left + right
-        if op == BinaryOp.SUB:
+        if op == BinaryOperator.SUB:
             return left - right
-        if op == BinaryOp.MUL:
+        if op == BinaryOperator.MUL:
             return left * right
-        if op == BinaryOp.DIV:
+        if op == BinaryOperator.DIV:
             return left / right
-        if op == BinaryOp.POW:
+        if op == BinaryOperator.POW:
             return left ** right
         raise ValueError(f"unsupported binary operator: {op}")
 
@@ -331,21 +335,3 @@ class ExpressionEvaluator:
             if key.lower() == lower:
                 return v
         raise ValueError(f"undefined variable: {name!r}")
-
-    def _node_to_str(self, node: ExprNode) -> str:
-        """Reconstruct a human-readable string from an AST node."""
-        if isinstance(node, NumberNode):
-            v = node.value
-            return str(int(v)) if v == int(v) else str(v)
-        if isinstance(node, VariableRefNode):
-            return node.name
-        if isinstance(node, FunctionCallNode):
-            args_str = ", ".join(self._node_to_str(a) for a in node.args)
-            return f"{node.name}({args_str})"
-        if isinstance(node, BinaryOpNode):
-            left = self._node_to_str(node.left)
-            right = self._node_to_str(node.right)
-            return f"({left} {node.op.value} {right})"
-        if isinstance(node, UnaryOpNode):
-            return f"-{self._node_to_str(node.operand)}"
-        raise ValueError(f"unknown AST node type: {type(node).__name__}")

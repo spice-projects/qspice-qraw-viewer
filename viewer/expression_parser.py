@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import NamedTuple
 
-from .expression_node import BinaryOp, BinaryOpNode, ExprNode, FunctionCallNode, NumberNode, UnaryOp, UnaryOpNode, VariableRefNode
+from .expression_node import BinaryOperator, BinaryOperatorNode, ExpressionNode, FunctionCallNode, NumberNode, UnaryOperator, UnaryOperatorNode, VariableRefNode
 
 # known mathematical functions that accept expressions as arguments;
 # everything else of the form IDENT(...) is treated as a SPICE variable
@@ -69,11 +69,11 @@ class ExpressionParser:
     with their arguments parsed as full sub-expressions.
     """
 
-    def parse(self, text: str) -> ExprNode:
+    def parse(self, text: str) -> ExpressionNode:
         """Parse *text* into an expression tree.
 
         :param text: Raw expression string, e.g. ``"V(R1,0) / I(R1)"``
-        :returns: Root :class:`~viewer.expression_node.ExprNode` of the AST.
+        :returns: Root :class:`~viewer.expression_node.ExpressionNode` of the AST.
         :raises ValueError: If the expression contains a syntax error.
         """
         # tokenize the input and reset the position cursor
@@ -105,40 +105,40 @@ class ExpressionParser:
         # exit
         return tok
 
-    def _parse_additive(self) -> ExprNode:
+    def _parse_additive(self) -> ExpressionNode:
         # parse the left-hand side of a potential addition or subtraction
         node = self._parse_multiplicative()
-        # consume any + or - operators and fold the right-hand side into a BinaryOpNode
+        # consume any + or - operators and fold the right-hand side into a BinaryOperatorNode
         while (tok := self._peek()) and tok.type in ("PLUS", "MINUS"):
             self._consume()
             right = self._parse_multiplicative()
-            op = BinaryOp.ADD if tok.value == "+" else BinaryOp.SUB
-            node = BinaryOpNode(node, op, right)
+            op = BinaryOperator.ADD if tok.value == "+" else BinaryOperator.SUB
+            node = BinaryOperatorNode(node, op, right)
         # exit
         return node
 
-    def _parse_multiplicative(self) -> ExprNode:
+    def _parse_multiplicative(self) -> ExpressionNode:
         # parse the left-hand side of a potential multiplication or division
         node = self._parse_unary()
-        # consume any * or / operators and fold the right-hand side into a BinaryOpNode
+        # consume any * or / operators and fold the right-hand side into a BinaryOperatorNode
         while (tok := self._peek()) and tok.type in ("STAR", "SLASH"):
             self._consume()
             right = self._parse_unary()
-            op = BinaryOp.MUL if tok.value == "*" else BinaryOp.DIV
-            node = BinaryOpNode(node, op, right)
+            op = BinaryOperator.MUL if tok.value == "*" else BinaryOperator.DIV
+            node = BinaryOperatorNode(node, op, right)
         # exit
         return node
 
-    def _parse_unary(self) -> ExprNode:
-        # handle unary minus by wrapping the operand in a UnaryOpNode
+    def _parse_unary(self) -> ExpressionNode:
+        # handle unary minus by wrapping the operand in a UnaryOperatorNode
         if (tok := self._peek()) and tok.type == "MINUS":
             self._consume()
             operand = self._parse_power()
-            return UnaryOpNode(UnaryOp.NEG, operand)
+            return UnaryOperatorNode(UnaryOperator.NEG, operand)
         # exit
         return self._parse_power()
 
-    def _parse_power(self) -> ExprNode:
+    def _parse_power(self) -> ExpressionNode:
         # parse the base of a potential power expression
         base = self._parse_primary()
         # if a ^ follows, parse the exponent right-associatively
@@ -146,11 +146,11 @@ class ExpressionParser:
             self._consume()
             # right-associative: exponent is parsed at unary precedence
             exp = self._parse_unary()
-            return BinaryOpNode(base, BinaryOp.POW, exp)
+            return BinaryOperatorNode(base, BinaryOperator.POW, exp)
         # exit
         return base
 
-    def _parse_primary(self) -> ExprNode:
+    def _parse_primary(self) -> ExpressionNode:
         # peek at the next token to determine what kind of primary to parse
         tok = self._peek()
         # raise if the expression is empty or unexpectedly ends here
@@ -169,7 +169,7 @@ class ExpressionParser:
                 # only treat as implicit multiplication when the IDENT is not a function call (not followed by '(')
                 if after_ident is None or after_ident.type != "LPAREN":
                     self._consume()
-                    return BinaryOpNode(NumberNode(value), BinaryOp.MUL, VariableRefNode(next_tok.value))
+                    return BinaryOperatorNode(NumberNode(value), BinaryOperator.MUL, VariableRefNode(next_tok.value))
             return NumberNode(value)
         # identifier — either a function call or a bare variable reference
         if tok.type == "IDENT":
@@ -198,9 +198,9 @@ class ExpressionParser:
             return node
         raise ValueError(f"unexpected token {tok.value!r}")
 
-    def _parse_expr_arglist(self) -> list[ExprNode]:
+    def _parse_expr_arglist(self) -> list[ExpressionNode]:
         """Parse a comma-separated list of full sub-expressions."""
-        args: list[ExprNode] = []
+        args: list[ExpressionNode] = []
         # parse the first argument if the list is non-empty
         if self._peek() and self._peek().type != "RPAREN":
             args.append(self._parse_additive())
