@@ -93,7 +93,7 @@ _MODE_TO_CHART: dict[str, str] = {
 
 class QRawFile:
 
-    def __init__(self, filename: Path, title: str, date: str, plotname: str, complex: bool, steps: int, abscissa: Expression, abscissa_scale: AbscissaScale, command: str, plot_suggestion: str, expression_manager: ExpressionManager, _mmap: mmap.mmap | None = None):
+    def __init__(self, filename: Path, title: str, date: str, plotname: str, complex: bool, steps: int, abscissa: Expression, abscissa_scale: AbscissaScale, command: str, plot_suggestion: str, expression_manager: ExpressionManager, _mmap: mmap.mmap | None = None, chart_type: str | None = None):
         # fields
         self._filename = filename
         self._title = title
@@ -111,6 +111,8 @@ class QRawFile:
         # calculated
         self._abscissa_points = len(abscissa.data)
         self._plot_suggestions: list[PlotSuggestion] | None = None
+        # pre-determined chart type
+        self._chart_type = chart_type
 
     @property
     def filename(self) -> Path:
@@ -146,6 +148,9 @@ class QRawFile:
 
     @property
     def chart_type(self) -> str:
+        # check initialized chart type
+        if self._chart_type is not None:
+            return self._chart_type
         # type unambiguously determines the chart layout
         if self._abscissa.unit == "Hz":
             return "AC"
@@ -238,12 +243,16 @@ class QRawFile:
                     break
                 # line: decode header text using Windows-1252
                 line = data[pos:newline].decode("cp1252").strip()
+                # log information
+                logger.debug(">> %s", line)
                 # advance position to next line
                 pos = newline + 1
                 # state machine to parse header and variables until binary section is reached
                 if in_variables:
                     # check for end of variables section
                     if line == "Binary:":
+                        # log information
+                        logger.debug(">> ...")
                         # binary section starts at the current position in the file
                         binary_offset = pos
                         # exit loop

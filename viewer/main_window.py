@@ -427,7 +427,7 @@ class MainWindow(QMainWindow):
         # build one «name» group per FFT expression so each gets its own chart
         plot_suggestion = " ".join(f"\xabfft {e.name}\xbb" for e in fft_expressions)
         # create a synthetic QRawFile with frequency abscissa and all FFT values
-        fft_qraw = QRawFile(filename=Path(f"fft_{result_expressions[0].name}.qraw"), title=f"FFT \u2013 {', '.join(e.name for e in result_expressions)}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=plot_suggestion, expression_manager=expression_manager)
+        fft_qraw = QRawFile(filename=self._qraw_path, title=f"FFT \u2013 {', '.join(e.name for e in result_expressions)}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=plot_suggestion, expression_manager=expression_manager, chart_type="FFT")
         # create a new MainWindow to render the FFT result using the existing infrastructure;
         # pass the original source path so Jupyter always opens the correct .qraw file
         fft_window = MainWindow(fft_qraw, source_qraw_path=self._qraw_path)
