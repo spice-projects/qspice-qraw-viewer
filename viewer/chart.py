@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGraphs import QAbstractAxis, QLineSeries, QValueAxis
+from PySide6.QtGraphs import QAbstractAxis, QLineSeries
 from PySide6.QtQuick import QQuickItem
 
 from .decimation_algorithm import DecimationAlgorithm, decimate_xy

@@ -229,7 +229,7 @@ class ExpressionEvaluator:
                 # entry is a (value, unit) pair, e.g. (3.14159..., "") for pi or (1.0, "S") for mho
                 const_value, const_unit = entry
                 # exit
-                return np.array(const_value), const_unit            
+                return np.array(const_value), const_unit
             try:
                 # lookup variable in context
                 var = self._lookup(node.name, context)
