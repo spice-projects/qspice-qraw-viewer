@@ -11,16 +11,15 @@ Item {
     property int _activeChartSeriesCount: 0
     property bool _activeChartIsTimeDomain: false
 
-    readonly property var seriesColorPalette: [
-        "#f77f00",  // orange
-        "#00b4d8",  // cyan
-        "#80ff72",  // green
-        "#e040fb",  // purple
-        "#ffdd00",  // yellow
-        "#ff4365",  // red
-        "#00f5d4",  // teal
-        "#bbdefb",  // pale blue
-    ]
+    readonly property var seriesColorPalette: ["#f77f00"  // orange
+        , "#00b4d8"  // cyan
+        , "#80ff72"  // green
+        , "#e040fb"  // purple
+        , "#ffdd00"  // yellow
+        , "#ff4365"  // red
+        , "#00f5d4"  // teal
+        , "#bbdefb"  // pale blue
+        ,]
 
     signal horizontalZoom(int chartIndex, real xLeftRatio, real xRightRatio, real zoomFactor)
     signal verticalZoom(int chartIndex, real yTopRatio, real yBottomRatio)
@@ -41,7 +40,6 @@ Item {
         // index of this panel in the chartsModel — set by the Repeater delegate
         required property int chartIndex
 
-        property int numberOfYAxes: -1
         property int seriesCounter: 0
         property int seriesCount: legendModel.count
         property bool legendVisible: false
@@ -49,21 +47,25 @@ Item {
 
         signal horizontalZoom(real xLeftRatio, real xRightRatio, real zoomFactor)
         signal verticalZoom(real yTopRatio, real yBottomRatio)
-        signal menuZoomToFit()
-        signal menuAutorange()
-        signal menuZoomAbscissaExtent()
-        signal menuAddRemovePlots()
-        signal menuDeleteAllPlots()
-        signal menuDeleteWindow()
+        signal menuZoomToFit
+        signal menuAutorange
+        signal menuZoomAbscissaExtent
+        signal menuAddRemovePlots
+        signal menuDeleteAllPlots
+        signal menuDeleteWindow
         // carries panel-local mouse coords so the root can position the shared menu
         signal menuOpenRequested(real localX, real localY, int seriesCount, bool isTimeDomain)
         signal pointerMoved(real xRatio)
-        signal pointerExited()
+        signal pointerExited
 
         // thin divider drawn above every panel except the first
         Rectangle {
             visible: panel.chartIndex > 0
-            anchors { top: parent.top; left: parent.left; right: parent.right }
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
             height: 2
             color: "#12131a"
         }
@@ -76,23 +78,27 @@ Item {
         }
 
         // series colors mirror the theme's seriesColors array — index cycles modulo length
-        readonly property var seriesColorPalette: [
-            "#f77f00",  // orange
-            "#00b4d8",  // cyan
-            "#80ff72",  // green
-            "#e040fb",  // purple
-            "#ffdd00",  // yellow
-            "#ff4365",  // red
-            "#00f5d4",  // teal
-            "#bbdefb",  // pale blue
-        ]
+        readonly property var seriesColorPalette: ["#f77f00"  // orange
+            , "#00b4d8"  // cyan
+            , "#80ff72"  // green
+            , "#e040fb"  // purple
+            , "#ffdd00"  // yellow
+            , "#ff4365"  // red
+            , "#00f5d4"  // teal
+            , "#bbdefb"  // pale blue
+            ,]
 
         GraphsView {
             id: graphsView
             marginLeft: 30
             marginRight: 30
             marginBottom: 0
-            anchors { top: parent.top; left: parent.left; right: parent.right; bottom: panelLegend.top }
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+                bottom: panelLegend.top
+            }
 
             property string xScale: "lin"
             property string xUnit: ""
@@ -129,7 +135,7 @@ Item {
                 labelDelegate: Item {
 
                     property string text: ""
-                    
+
                     Text {
                         anchors.fill: parent
                         color: "#b0b8c8"
@@ -139,187 +145,92 @@ Item {
                         text: {
                             // format the X axis label based on the selected scale
                             switch (graphsView.xScale) {
-                                case "dec":
-                                    return graphsView.decadeValueFormatter(graphsView.xUnit, parent.text)
-                                case "oct":
-                                    return graphsView.octaveValueFormatter(graphsView.xUnit, parent.text)
-                                default:
-                                    return graphsView.linearValueFormatter(graphsView.xUnit, parent.text)
+                            case "dec":
+                                return graphsView.decadeValueFormatter(graphsView.xUnit, parent.text);
+                            case "oct":
+                                return graphsView.octaveValueFormatter(graphsView.xUnit, parent.text);
+                            default:
+                                return graphsView.linearValueFormatter(graphsView.xUnit, parent.text);
                             }
                         }
                     }
                 }
             }
 
-            ValueAxis {
-                id: axisYLeft1
-                lineVisible: true
-                labelsVisible: true
-                titleVisible: false
-                titleText: ""
-                alignment: Qt.AlignLeft
-
-                property string yUnit: ""
-
-                labelDelegate: Item {
-
-                    property string text: ""
-
-                    Text {
-                        anchors.fill: parent
-                        color: "#b0b8c8"
-                        font.pixelSize: 10
-                        horizontalAlignment: Text.AlignRight
-                        verticalAlignment: Text.AlignVCenter
-                        text: graphsView.linearValueFormatter(axisYLeft1.yUnit, parent.text)
-                    }
-                }
-            }
-
-            ValueAxis {
-                id: axisYLeft2
-                lineVisible: true
-                labelsVisible: true
-                titleVisible: false
-                titleText: ""
-                alignment: Qt.AlignLeft
-
-                property string yUnit: ""
-
-                labelDelegate: Item {
-
-                    property string text: ""
-
-                    Text {
-                        anchors.fill: parent
-                        color: "#b0b8c8"
-                        font.pixelSize: 10
-                        horizontalAlignment: Text.AlignRight
-                        verticalAlignment: Text.AlignVCenter
-                        text: graphsView.linearValueFormatter(axisYLeft2.yUnit, parent.text)
-                    }
-                }
-            }
-
-            ValueAxis {
-                id: axisYRight1
-                lineVisible: true
-                labelsVisible: true
-                titleVisible: false
-                titleText: ""
-                alignment: Qt.AlignRight
-
-                property string yUnit: ""
-
-                labelDelegate: Item {
-
-                    property string text: ""
-
-                    Text {
-                        anchors.fill: parent
-                        color: "#b0b8c8"
-                        font.pixelSize: 10
-                        horizontalAlignment: Text.AlignLeft
-                        verticalAlignment: Text.AlignVCenter
-                        text: graphsView.linearValueFormatter(axisYRight1.yUnit, parent.text)
-                    }
-                }
-            }
-
-            ValueAxis {
-                id: axisYRight2
-                lineVisible: true
-                labelsVisible: true
-                titleVisible: false
-                titleText: ""
-                alignment: Qt.AlignRight
-
-                property string yUnit: ""
-
-                labelDelegate: Item {
-
-                    property string text: ""
-                    
-                    Text {
-                        anchors.fill: parent
-                        color: "#b0b8c8"
-                        font.pixelSize: 10
-                        horizontalAlignment: Text.AlignLeft
-                        verticalAlignment: Text.AlignVCenter
-                        text: graphsView.linearValueFormatter(axisYRight2.yUnit, parent.text)
-                    }
-                }
-            }
-
             function applyUnit(unit, text, value) {
                 // absolute value for prefix selection
-                const absValue = Math.abs(value)
+                const absValue = Math.abs(value);
                 // giga
                 if (absValue >= 1e9)
-                    return (value / 1e9).toFixed(2) + " G" + unit
+                    return (value / 1e9).toFixed(1) + "G" + unit;
                 // mega
                 if (absValue >= 1e6)
-                    return (value / 1e6).toFixed(2) + " M" + unit
+                    return (value / 1e6).toFixed(1) + "M" + unit;
                 // kilo
                 if (absValue >= 1e3)
-                    return (value / 1e3).toFixed(2) + " k" + unit
+                    return (value / 1e3).toFixed(1) + "k" + unit;
                 // base unit
                 if (absValue >= 1.0)
-                    return value.toFixed(2) + " " + unit
+                    return value.toFixed(1) + unit;
                 // zero
                 if (absValue < 1e-15)
-                    return "0 " + unit
+                    return "0" + unit;
                 // femto
                 if (absValue < 1e-12)
-                    return (value * 1e15).toFixed(2) + " f" + unit
+                    return (value * 1e15).toFixed(1) + "f" + unit;
                 // pico
                 if (absValue < 1e-9)
-                    return (value * 1e12).toFixed(2) + " p" + unit
+                    return (value * 1e12).toFixed(1) + "p" + unit;
                 // nano
                 if (absValue < 1e-6)
-                    return (value * 1e9).toFixed(2) + " n" + unit
+                    return (value * 1e9).toFixed(1) + "n" + unit;
                 // micro
                 if (absValue < 1e-3)
-                    return (value * 1e6).toFixed(2) + " µ" + unit
+                    return (value * 1e6).toFixed(1) + "µ" + unit;
                 // milli
-                return (value * 1e3).toFixed(2) + " m" + unit
+                return (value * 1e3).toFixed(1) + "m" + unit;
             }
 
             function linearValueFormatter(unit, text) {
                 // parse value
-                var value = parseFloat(text)
+                var value = parseFloat(text);
                 if (isNaN(value))
-                    return text
+                    return text;
                 // unit
-                return applyUnit(unit, text, value)
+                return applyUnit(unit, text, value);
             }
 
             function decadeValueFormatter(unit, text) {
                 // parse value
-                var value = parseFloat(text)
+                var value = parseFloat(text);
                 if (isNaN(value))
-                    return text
+                    return text;
                 // calculate actual value from decade exponent
-                var actual = Math.pow(10, value)
+                var actual = Math.pow(10, value);
                 // unit
-                return applyUnit(unit, text, actual)
+                return applyUnit(unit, text, actual);
             }
 
             function octaveValueFormatter(unit, text) {
                 // parse value
-                var value = parseFloat(text)
+                var value = parseFloat(text);
                 if (isNaN(value))
-                    return text
+                    return text;
                 // calculate actual value from octave exponent
-                var actual = Math.pow(2, value)
+                var actual = Math.pow(2, value);
                 // unit
-                return applyUnit(unit, text, actual)
+                return applyUnit(unit, text, actual);
             }
         }
 
         Item {
             id: selectionOverlay
-            anchors { top: parent.top; left: parent.left; right: parent.right; bottom: panelLegend.top }
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+                bottom: panelLegend.top
+            }
 
             // last mouse X recorded during a pan drag — updated each frame so each delta is incremental
             property real panLastX: 0
@@ -329,11 +240,11 @@ Item {
             // map a pixel X within the overlay to a 0-1 plot-area fraction (0=left, 1=right)
             function pixelToXRatio(px) {
                 // rectangle
-                var r = graphsView.plotArea
+                var r = graphsView.plotArea;
                 // compute ratio of pixel X within the plot area, clamped to [0, 1]
-                var ratio = (px - r.x) / r.width
+                var ratio = (px - r.x) / r.width;
                 // clamp and return
-                return Math.max(0, Math.min(1, ratio))
+                return Math.max(0, Math.min(1, ratio));
             }
 
             // perform a horizontal zoom around a normalized centre point
@@ -346,15 +257,15 @@ Item {
             // most professional plotting applications.
             function applyXZoom(center, factor) {
                 // compute raw ratios
-                var xr1 = center - center * factor
-                var xr2 = center + (1.0 - center) * factor
+                var xr1 = center - center * factor;
+                var xr2 = center + (1.0 - center) * factor;
                 // enforce non-negative left bound only; right may exceed 1 so Python
                 // can distinguish zoom-out from pan
                 if (xr1 < 0) {
-                    xr1 = 0
+                    xr1 = 0;
                 }
 
-                panel.horizontalZoom(xr1, xr2, factor)
+                panel.horizontalZoom(xr1, xr2, factor);
             }
 
             // left-button drag — pans the X axis left/right
@@ -366,28 +277,28 @@ Item {
                 // show grab cursor while hovering so the interaction is discoverable
                 cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
-                onPressed: (mouse) => {
+                onPressed: mouse => {
                     // record the starting X and Y so the first positionChanged has a valid reference
-                    selectionOverlay.panLastX = mouse.x
-                    selectionOverlay.panLastY = mouse.y
+                    selectionOverlay.panLastX = mouse.x;
+                    selectionOverlay.panLastY = mouse.y;
                 }
 
-                onPositionChanged: (mouse) => {
+                onPositionChanged: mouse => {
                     if (pressed) {
                         // compute how far the mouse moved as a fraction of the plot area dimensions
-                        var dx = (mouse.x - selectionOverlay.panLastX) / graphsView.plotArea.width
-                        var dy = (mouse.y - selectionOverlay.panLastY) / graphsView.plotArea.height
+                        var dx = (mouse.x - selectionOverlay.panLastX) / graphsView.plotArea.width;
+                        var dy = (mouse.y - selectionOverlay.panLastY) / graphsView.plotArea.height;
                         // update references for the next incremental step
-                        selectionOverlay.panLastX = mouse.x
-                        selectionOverlay.panLastY = mouse.y
+                        selectionOverlay.panLastX = mouse.x;
+                        selectionOverlay.panLastY = mouse.y;
                         // dragging right means pulling the data right — shift the horizontal window left
-                        panel.horizontalZoom(0 - dx, 1 - dx, 1)
+                        panel.horizontalZoom(0 - dx, 1 - dx, 1);
                         // dragging down in screen space means pulling the data down — shift the vertical window up
                         // screen Y is inverted vs data Y so the sign is opposite to horizontal
-                        panel.verticalZoom(dy, 1 + dy)
+                        panel.verticalZoom(dy, 1 + dy);
                     }
                     // always report pointer position to the status bar
-                    panel.pointerMoved(selectionOverlay.pixelToXRatio(mouse.x))
+                    panel.pointerMoved(selectionOverlay.pixelToXRatio(mouse.x));
                 }
 
                 onExited: panel.pointerExited()
@@ -399,38 +310,37 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.RightButton
-                onClicked: (mouse) => panel.menuOpenRequested(mouse.x, mouse.y, panel.seriesCount, graphsView.xUnit === "s")
+                onClicked: mouse => panel.menuOpenRequested(mouse.x, mouse.y, panel.seriesCount, graphsView.xUnit === "s")
             }
 
             // mouse-wheel — X zoom toward cursor (plain), Y zoom toward cursor (Alt held)
             WheelHandler {
                 // include TouchPad so macOS trackpads are handled as well
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                onWheel: function(event) {
+                onWheel: function (event) {
                     // zoom factor: <1 = zoom in, >1 = zoom out; 0.15 per standard detent
                     // log raw wheel movement
 
                     // compute factor: positive delta will now produce f>1 (zoom out)
-                    var f = 1.0 + (event.angleDelta.y / 120) * 0.15
+                    var f = 1.0 + (event.angleDelta.y / 120) * 0.15;
                     // clamp to avoid inverting the range or zooming out infinitely
-                    f = Math.max(0.05, Math.min(4.0, f))
+                    f = Math.max(0.05, Math.min(4.0, f));
                     if (event.modifiers & Qt.AltModifier) {
                         // vertical zoom centered on cursor Y position
-                        var r = graphsView.plotArea
+                        var r = graphsView.plotArea;
                         // cursor as 0-1 fraction of plot height in screen space (0=top, 1=bottom)
-                        var cy_screen = Math.max(0, Math.min(1, (event.y - r.y) / r.height))
+                        var cy_screen = Math.max(0, Math.min(1, (event.y - r.y) / r.height));
                         // invert to data space so 0=bottom of range, 1=top of range
-                        var cy = 1.0 - cy_screen
-                        var yr1 = cy - cy * f
-                        var yr2 = cy + (1.0 - cy) * f
+                        var cy = 1.0 - cy_screen;
+                        var yr1 = cy - cy * f;
+                        var yr2 = cy + (1.0 - cy) * f;
                         // emit dedicated vertical signal so it never collides with horizontal ratios
-                        panel.verticalZoom(yr1, yr2)
-                    } 
-                    else {
+                        panel.verticalZoom(yr1, yr2);
+                    } else {
                         // horizontal zoom centered on cursor X position
-                        var cx = selectionOverlay.pixelToXRatio(event.x)
+                        var cx = selectionOverlay.pixelToXRatio(event.x);
                         // call helper on the overlay object so it’s in scope
-                        selectionOverlay.applyXZoom(cx, f)
+                        selectionOverlay.applyXZoom(cx, f);
                     }
                 }
             }
@@ -442,7 +352,11 @@ Item {
 
         Rectangle {
             id: panelLegend
-            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
             color: "#1a1b1e"
             height: 20
             opacity: panel.legendVisible ? 1 : 0
@@ -474,128 +388,134 @@ Item {
             }
         }
 
+        Component {
+            id: yAxisComponent
+
+            ValueAxis {
+                id: valueAxis
+
+                property string yUnit: ""
+
+                lineVisible: true
+                labelsVisible: true
+                titleVisible: false
+                alignment: Qt.AlignLeft
+                labelDelegate: Item {
+                    property string text: ""
+                    Text {
+                        anchors.fill: parent
+                        color: "#b0b8c8"
+                        font.pixelSize: 10
+                        horizontalAlignment: valueAxis.alignment === Qt.AlignLeft ? Text.AlignRight : Text.AlignLeft
+                        verticalAlignment: Text.AlignVCenter
+                        text: graphsView.linearValueFormatter(valueAxis.yUnit, parent.text)
+                    }
+                }
+            }
+        }
+
         function initialize(axisXTitle, axisXUnit, axisXScale, axisXMinValue, axisXMaxValue) {
             // set X title
-            axisX.titleText = axisXTitle
+            axisX.titleText = axisXTitle;
             // unit and scale
-            graphsView.xUnit = axisXUnit
-            graphsView.xScale = axisXScale
-            // tick interval
-            axisX.tickInterval = (axisXMaxValue - axisXMinValue) / 10
+            graphsView.xUnit = axisXUnit;
+            graphsView.xScale = axisXScale;
+            // one tick per decade/octave in log space; ten equal ticks for linear
+            axisX.tickInterval = (axisXScale === "lin") ? (axisXMaxValue - axisXMinValue) / 10 : 1.0;
+            axisX.subTickCount = (axisXScale === "lin") ? 10 : 0;
             // set X range
-            axisX.min = axisXMinValue
-            axisX.max = axisXMaxValue
+            axisX.min = axisXMinValue;
+            axisX.max = axisXMaxValue;
+        }
+
+        function createYAxis(alignment, unit) {
+            // create and return a new ValueAxis instance from the component
+            const axis = yAxisComponent.createObject(graphsView);
+            // set property values
+            axis.alignment = alignment;
+            axis.yUnit = unit;
+            // use axis
+            return axis;
         }
 
         function resizeAbscissa(axisXMinValue, axisXMaxValue) {
             // update X axis range after a zoom operation
-            axisX.min = axisXMinValue
-            axisX.max = axisXMaxValue
-            // interval
-            axisX.tickInterval = (axisXMaxValue - axisXMinValue) / 10
+            axisX.min = axisXMinValue;
+            axisX.max = axisXMaxValue;
+            // one tick per decade/octave in log space; ten equal ticks for linear
+            axisX.tickInterval = (graphsView.xScale === "lin") ? (axisXMaxValue - axisXMinValue) / 10 : 1.0;
         }
 
-        function createYAxis(title, unit) {
-            // validate a maximum of 4 Y axes (2 on the left, 2 on the right)
-            if (numberOfYAxes === 3) {
-                // log information
-                console.warn("Maximum number of Y axes reached")
-                // exit, indicate failure to create a new axis
-                return null
-            }
-            // increment number of Y axes
-            numberOfYAxes++
-            // axis
-            var axis = null
-            // assign the next available slot: left1 → right1 → left2 → right2
-            switch (numberOfYAxes) {
-                case 0: 
-                    axis = axisYLeft1
-                    break;
-                case 1: 
-                    axis = axisYRight1
-                    break;
-                case 2: 
-                    axis = axisYLeft2
-                    break;
-                default: 
-                    axis = axisYRight2
-                    break;
-            }
-            // configure axis
-            axis.titleText = title
-            axis.yUnit = unit
-            // exit
-            return axis
-        }
-
-        function plotSeries(seriesToAdd, seriesToRemove) {
+        function updateGraphsView(seriesToAdd, seriesToRemove) {
             // loop series, multiple added in batch
             for (var i = 0; i < seriesToAdd.length; i++) {
                 // current series in loop
-                const current = seriesToAdd[i]
+                const current = seriesToAdd[i];
                 // series name & data
-                const name = current[0]
-                const data = current[1]
+                const name = current[0];
+                const data = current[1];
                 // compute color index and color from palette using monotonic counter — never changes on removal
-                const colorIndex = seriesCounter % seriesColorPalette.length
-                const seriesColor = seriesColorPalette[colorIndex]
+                const colorIndex = seriesCounter % seriesColorPalette.length;
+                const seriesColor = seriesColorPalette[colorIndex];
                 // increment counter before adding so the next series gets a different slot
-                seriesCounter++
+                seriesCounter++;
                 // loop series lines
                 for (var j = 0; j < data.length; j++) {
                     // series
-                    const series = data[j]
+                    const series = data[j];
                     // set line color from the palette
-                    series.color = seriesColor
+                    series.color = seriesColor;
                     // append to chart
-                    graphsView.addSeries(series)
+                    graphsView.addSeries(series);
                 }
                 // append legend entry with the same color
-                legendModel.append({ seriesName: name, seriesColor: seriesColor })
+                legendModel.append({
+                    seriesName: name,
+                    seriesColor: seriesColor
+                });
             }
             // loop series to remove
             for (var i = 0; i < seriesToRemove.length; i++) {
                 // current
-                const current = seriesToRemove[i]
+                const current = seriesToRemove[i];
                 // series name & data
-                const name = current[0]
-                const data = current[1]
+                const name = current[0];
+                const data = current[1];
                 // loop series lines
                 for (var j = data.length - 1; j >= 0; j--) {
                     // series
-                    const series = data[j]
+                    const series = data[j];
                     // remove from chart
-                    graphsView.removeSeries(series)
+                    graphsView.removeSeries(series);
                 }
                 // loop legend entries
                 for (var j = legendModel.count - 1; j >= 0; j--) {
                     // compare name to find the matching legend entry to remove
                     if (legendModel.get(j)["seriesName"] === name) {
                         // remove legend entry with matching name
-                        legendModel.remove(j)
+                        legendModel.remove(j);
                         // exit loop
-                        break
+                        break;
                     }
                 }
             }
             // reveal the legend the first time we plot series
             if (!panel.legendVisible) {
                 // reveal the legend after a short delay so the chart has time to paint first
-                legendRevealTimer.restart()
+                legendRevealTimer.restart();
             }
         }
 
         function removeAllSeries() {
             // loop all series in the chart and remove them
-            for (var i = graphsView.seriesList.length - 1; i >= 0; i--) 
-                graphsView.removeSeries(i)
+            for (var i = graphsView.seriesList.length - 1; i >= 0; i--)
+                graphsView.removeSeries(i);
             // clear the legend
-            legendModel.clear()
+            legendModel.clear();
             // reset counter
-            seriesCounter = 0
-            // vertical axes
-            numberOfYAxes = -1
+            seriesCounter = 0;
+            // reset default Y axis
+            graphsView.axisY = null;
         }
     }
 
@@ -624,27 +544,27 @@ Item {
                 onHorizontalZoom: (xr1, xr2, f) => root.horizontalZoom(index, xr1, xr2, f)
                 onVerticalZoom: (yr1, yr2) => root.verticalZoom(index, yr1, yr2)
                 // bubble menu action signals up to root, adding chartIndex
-                onMenuZoomToFit:          root.menuZoomToFit(index)
-                onMenuAutorange:          root.menuAutorange(index)
+                onMenuZoomToFit: root.menuZoomToFit(index)
+                onMenuAutorange: root.menuAutorange(index)
                 onMenuZoomAbscissaExtent: root.menuZoomAbscissaExtent(index)
-                onMenuAddRemovePlots:     root.menuAddRemovePlots(index)
-                onMenuDeleteAllPlots:     root.menuDeleteAllPlots(index)
-                onMenuDeleteWindow:       root.menuDeleteWindow(index)
+                onMenuAddRemovePlots: root.menuAddRemovePlots(index)
+                onMenuDeleteAllPlots: root.menuDeleteAllPlots(index)
+                onMenuDeleteWindow: root.menuDeleteWindow(index)
                 // bubble pointer hover signals up to root, adding chartIndex
-                onPointerMoved: (xRatio) => root.pointerMoved(index, xRatio)
+                onPointerMoved: xRatio => root.pointerMoved(index, xRatio)
                 onPointerExited: root.pointerExited(index)
                 // position and reveal the single shared context menu on right-click
                 onMenuOpenRequested: (localX, localY, sc, itd) => {
                     // map from panel-local coordinates to root-local coordinates
-                    var pt = mapToItem(root, localX, localY)
-                    root._activeChartIndex = index
-                    root._activeChartSeriesCount = sc
-                    root._activeChartIsTimeDomain = itd
+                    var pt = mapToItem(root, localX, localY);
+                    root._activeChartIndex = index;
+                    root._activeChartSeriesCount = sc;
+                    root._activeChartIsTimeDomain = itd;
                     // clamp so the menu never overflows the root boundary
-                    contextMenu.x = Math.min(pt.x, root.width  - contextMenu.width  - 2)
-                    contextMenu.y = Math.min(pt.y, root.height - contextMenu.height - 2)
+                    contextMenu.x = Math.min(pt.x, root.width - contextMenu.width - 2);
+                    contextMenu.y = Math.min(pt.y, root.height - contextMenu.height - 2);
                     // show menu
-                    contextMenu.visible = true
+                    contextMenu.visible = true;
                 }
             }
         }
@@ -669,74 +589,108 @@ Item {
         border.width: 1
         radius: 4
 
-        component ContextMenuItem: Rectangle {
-            id: itemRoot
-            required property string itemText
-            signal triggered()
-            width: contextMenu.width
-            implicitHeight: 26
-            color: itemMouse.containsMouse ? "#3a3d4a" : "transparent"
-            radius: 2
-            Text {
-                anchors.fill: parent
-                text: itemRoot.itemText
-                color: itemRoot.enabled ? "#b0b8c8" : "#4a5060"
-                font.pixelSize: 12
-                leftPadding: 12
-                verticalAlignment: Text.AlignVCenter
-            }
-            MouseArea {
-                id: itemMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                enabled: itemRoot.enabled
-                onClicked: { contextMenu.visible = false; itemRoot.triggered() }
-            }
-        }
-
-        // reusable separator
-        component ContextMenuSeparator: Rectangle {
-            width: contextMenu.width
-            implicitHeight: 9
-            color: "transparent"
-            Rectangle {
-                anchors.centerIn: parent
-                width: parent.width - 8
-                height: 1
-                color: "#3a3d4a"
-            }
-        }
-
         Column {
             id: menuColumn
-            anchors { top: parent.top; left: parent.left; topMargin: 4 }
+            anchors {
+                top: parent.top
+                left: parent.left
+                topMargin: 4
+            }
 
-            ContextMenuItem { itemText: "Zoom to Fit";          onTriggered: root.menuZoomToFit(root._activeChartIndex) }
-            ContextMenuItem { itemText: "Autorange";            onTriggered: root.menuAutorange(root._activeChartIndex) }
-            ContextMenuItem { itemText: "Zoom Abscissa Extent"; onTriggered: root.menuZoomAbscissaExtent(root._activeChartIndex) }
+            ContextMenuItem {
+                itemText: "Zoom to Fit"
+                onTriggered: root.menuZoomToFit(root._activeChartIndex)
+            }
+            ContextMenuItem {
+                itemText: "Autorange"
+                onTriggered: root.menuAutorange(root._activeChartIndex)
+            }
+            ContextMenuItem {
+                itemText: "Zoom Abscissa Extent"
+                onTriggered: root.menuZoomAbscissaExtent(root._activeChartIndex)
+            }
             ContextMenuSeparator {}
-            ContextMenuItem { itemText: "Add/Remove Plots";     onTriggered: root.menuAddRemovePlots(root._activeChartIndex) }
-            ContextMenuItem { itemText: "Delete All Plots";     enabled: root._activeChartSeriesCount > 0; onTriggered: root.menuDeleteAllPlots(root._activeChartIndex) }
+            ContextMenuItem {
+                itemText: "Add/Remove Plots"
+                onTriggered: root.menuAddRemovePlots(root._activeChartIndex)
+            }
+            ContextMenuItem {
+                itemText: "Delete All Plots"
+                enabled: root._activeChartSeriesCount > 0
+                onTriggered: root.menuDeleteAllPlots(root._activeChartIndex)
+            }
             ContextMenuSeparator {}
-            ContextMenuItem { itemText: "FFT...";               enabled: root._activeChartIsTimeDomain && root._activeChartSeriesCount > 0; onTriggered: root.menuFft(root._activeChartIndex) }
+            ContextMenuItem {
+                itemText: "FFT..."
+                enabled: root._activeChartIsTimeDomain && root._activeChartSeriesCount > 0
+                onTriggered: root.menuFft(root._activeChartIndex)
+            }
             ContextMenuSeparator {}
-            ContextMenuItem { itemText: "Add Window";           onTriggered: root.menuAddWindow(root._activeChartIndex) }
-            ContextMenuItem { itemText: "Delete Window";        enabled: chartsModel.count > 1; onTriggered: root.menuDeleteWindow(root._activeChartIndex) }
+            ContextMenuItem {
+                itemText: "Add Window"
+                onTriggered: root.menuAddWindow(root._activeChartIndex)
+            }
+            ContextMenuItem {
+                itemText: "Delete Window"
+                enabled: chartsModel.count > 1
+                onTriggered: root.menuDeleteWindow(root._activeChartIndex)
+            }
+        }
+    }
+
+    component ContextMenuItem: Rectangle {
+        id: itemRoot
+        required property string itemText
+        signal triggered
+        width: contextMenu.width
+        implicitHeight: 26
+        color: itemMouse.containsMouse ? "#3a3d4a" : "transparent"
+        radius: 2
+        Text {
+            anchors.fill: parent
+            text: itemRoot.itemText
+            color: itemRoot.enabled ? "#b0b8c8" : "#4a5060"
+            font.pixelSize: 12
+            leftPadding: 12
+            verticalAlignment: Text.AlignVCenter
+        }
+        MouseArea {
+            id: itemMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: itemRoot.enabled
+            onClicked: {
+                contextMenu.visible = false;
+                itemRoot.triggered();
+            }
+        }
+    }
+
+    // reusable separator
+    component ContextMenuSeparator: Rectangle {
+        width: contextMenu.width
+        implicitHeight: 9
+        color: "transparent"
+        Rectangle {
+            anchors.centerIn: parent
+            width: parent.width - 8
+            height: 1
+            color: "#3a3d4a"
         }
     }
 
     function addChart() {
         // append a new chart panel entry to the model; the Repeater reacts immediately
-        chartsModel.append({})
+        chartsModel.append({});
     }
 
     function removeChart(chartIndex) {
         // remove the panel at the given index; remaining panels reflow automatically
-        chartsModel.remove(chartIndex)
+        chartsModel.remove(chartIndex);
     }
 
     function getChart(chartIndex) {
         // return the live ChartPanel item so Python can call initialize / addSeries etc.
-        return chartsRepeater.itemAt(chartIndex)
+        return chartsRepeater.itemAt(chartIndex);
     }
 }

@@ -6,8 +6,7 @@ from enum import Enum
 from typing import Union
 
 
-class BinaryOp(Enum):
-    """Binary arithmetic operators supported in expressions."""
+class BinaryOperator(Enum):
 
     ADD = "+"
     SUB = "-"
@@ -16,54 +15,56 @@ class BinaryOp(Enum):
     POW = "^"
 
 
-class UnaryOp(Enum):
-    """Unary operators supported in expressions."""
+class UnaryOperator(Enum):
 
     NEG = "-"
 
 
 @dataclass
 class NumberNode:
-    """A numeric literal constant."""
 
     value: float
 
 
 @dataclass
 class VariableRefNode:
-    """A reference to a simulation variable by its full name.
-
-    The ``name`` matches the key used to look up the variable in the
-    evaluation context (e.g. ``"V(R1)"``, ``"I(R1,0)"``, ``"Vout"``).
-    """
 
     name: str
+
+    def __str__(self) -> str:
+        return self.name
 
 
 @dataclass
 class FunctionCallNode:
-    """A call to a known mathematical function (e.g. ``db``, ``abs``, ``sqrt``)."""
 
     name: str
-    args: list[ExprNode] = field(default_factory=list)
+    args: list[ExpressionNode] = field(default_factory=list)
+
+    def __str__(self) -> str:
+        return f"{self.name}({",".join(str(a) for a in self.args)})"
 
 
 @dataclass
-class BinaryOpNode:
-    """A binary arithmetic operation between two sub-expressions."""
+class BinaryOperatorNode:
 
-    left: ExprNode
-    op: BinaryOp
-    right: ExprNode
+    left: ExpressionNode
+    op: BinaryOperator
+    right: ExpressionNode
+
+    def __str__(self) -> str:
+        return f"({self.left}{self.op.value}{self.right})"
 
 
 @dataclass
-class UnaryOpNode:
-    """A unary operation applied to a single sub-expression."""
+class UnaryOperatorNode:
 
-    op: UnaryOp
-    operand: ExprNode
+    op: UnaryOperator
+    operand: ExpressionNode
+
+    def __str__(self) -> str:
+        return f"{self.op.value}{self.operand}"
 
 
 # union type for all AST nodes
-ExprNode = Union[NumberNode, VariableRefNode, FunctionCallNode, BinaryOpNode, UnaryOpNode]
+ExpressionNode = Union[NumberNode, VariableRefNode, FunctionCallNode, BinaryOperatorNode, UnaryOperatorNode]

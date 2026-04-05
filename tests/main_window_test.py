@@ -193,6 +193,7 @@ class TestMainWindowSlots(TestCase):
         # build a bare MainWindow bypassing __init__
         win = MainWindow.__new__(MainWindow)
         win._abscissa = MagicMock(data=list(range(total)), values=list(range(total)))
+        win._default_chart_type = "AC"
         win._charts = []
         win._abscissa_from_index = 0
         win._abscissa_to_index = total

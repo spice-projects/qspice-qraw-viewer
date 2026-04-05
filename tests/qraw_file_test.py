@@ -5,16 +5,7 @@ from unittest import TestCase
 import numpy as np
 
 from viewer.expression import Expression
-from viewer.qraw_file import (
-    AbscissaScale,
-    PlotSuggestion,
-    QRawFile,
-    VariableType,
-    VariableTypeInformation,
-    _chart_type_for_file,
-    _process_scale,
-    _process_step,
-)
+from viewer.qraw_file import (AbscissaScale, PlotSuggestion, QRawFile, VariableType, VariableTypeInformation, _process_scale, _process_step)
 
 FIXTURES_DIR = Path(__file__).parent / "PyQSPICE"
 
@@ -98,7 +89,7 @@ class TestQRawFile(TestCase):
         # assert default variables
         self.assertEqual(len(qraw.get_plot_suggestions()), 1)
         self.assertEqual(qraw.get_plot_suggestions()[0].chart_type, "AC")
-        self.assertEqual([v.name for v in qraw.get_plot_suggestions()[0].expressions], ["(V(VOUT) / V(VO))"])
+        self.assertEqual([v.name for v in qraw.get_plot_suggestions()[0].expressions], ["(V(VOUT)/V(VO))"])
 
     def test_loading_30_TRAN(self):
         # arrange
@@ -529,49 +520,6 @@ class TestProcessScale(TestCase):
         # assert
         self.assertEqual(result.name, "Frequency")
         self.assertEqual(result.unit, "Hz")
-
-
-class TestChartTypeForFile(TestCase):
-
-    def test_hz_unit_maps_to_ac(self):
-        # arrange
-        abscissa = Expression("Frequency", np.array([1.0]), "Hz")
-        # act
-        result = _chart_type_for_file(abscissa)
-        # assert
-        self.assertEqual(result, "AC")
-
-    def test_seconds_unit_maps_to_transient(self):
-        # arrange
-        abscissa = Expression("Time", np.array([0.0]), "s")
-        # act
-        result = _chart_type_for_file(abscissa)
-        # assert
-        self.assertEqual(result, "TRANSIENT")
-
-    def test_volts_unit_maps_to_dc(self):
-        # arrange
-        abscissa = Expression("V1", np.array([0.0]), "V")
-        # act
-        result = _chart_type_for_file(abscissa)
-        # assert
-        self.assertEqual(result, "DC")
-
-    def test_empty_unit_maps_to_dc(self):
-        # arrange — operating point sweep uses a dimensionless parameter
-        abscissa = Expression("s", np.array([0.0]), "")
-        # act
-        result = _chart_type_for_file(abscissa)
-        # assert
-        self.assertEqual(result, "DC")
-
-    def test_ampere_unit_maps_to_dc(self):
-        # arrange — current-swept DC analysis
-        abscissa = Expression("I1", np.array([0.0]), "A")
-        # act
-        result = _chart_type_for_file(abscissa)
-        # assert
-        self.assertEqual(result, "DC")
 
 
 class TestVariableTypeInformation(TestCase):

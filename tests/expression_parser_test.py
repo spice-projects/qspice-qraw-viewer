@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from viewer.expression_node import BinaryOp, BinaryOpNode, FunctionCallNode, NumberNode, UnaryOp, UnaryOpNode, VariableRefNode
+from viewer.expression_node import BinaryOperator, BinaryOperatorNode, FunctionCallNode, NumberNode, UnaryOperator, UnaryOperatorNode, VariableRefNode
 from viewer.expression_parser import ExpressionParser
 
 
@@ -123,8 +123,8 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("V(out) + V(in)")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.ADD)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.ADD)
         self.assertIsInstance(node.left, VariableRefNode)
         self.assertIsInstance(node.right, VariableRefNode)
 
@@ -134,8 +134,8 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("V(out) - V(in)")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.SUB)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.SUB)
 
     def test_parse_multiplication(self):
         # arrange
@@ -143,8 +143,8 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("10 * V(R1)")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.MUL)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.MUL)
         self.assertIsInstance(node.left, NumberNode)
         self.assertEqual(node.left.value, 10.0)
         self.assertIsInstance(node.right, VariableRefNode)
@@ -155,8 +155,8 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("V(out) / I(R1)")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.DIV)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.DIV)
 
     def test_parse_power(self):
         # arrange
@@ -164,8 +164,8 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("V(out) ^ 2")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.POW)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.POW)
 
     def test_precedence_mul_before_add(self):
         # arrange — "a + b * c" should parse as "a + (b * c)"
@@ -173,10 +173,10 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("V(a) + 2 * V(b)")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.ADD)
-        self.assertIsInstance(node.right, BinaryOpNode)
-        self.assertEqual(node.right.op, BinaryOp.MUL)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.ADD)
+        self.assertIsInstance(node.right, BinaryOperatorNode)
+        self.assertEqual(node.right.op, BinaryOperator.MUL)
 
     def test_precedence_power_before_mul(self):
         # arrange — "a * b ^ 2" should parse as "a * (b ^ 2)"
@@ -184,10 +184,10 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("2 * V(out) ^ 2")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.MUL)
-        self.assertIsInstance(node.right, BinaryOpNode)
-        self.assertEqual(node.right.op, BinaryOp.POW)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.MUL)
+        self.assertIsInstance(node.right, BinaryOperatorNode)
+        self.assertEqual(node.right.op, BinaryOperator.POW)
 
     def test_parse_unary_negation(self):
         # arrange
@@ -195,8 +195,8 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("-V(out)")
         # assert
-        self.assertIsInstance(node, UnaryOpNode)
-        self.assertEqual(node.op, UnaryOp.NEG)
+        self.assertIsInstance(node, UnaryOperatorNode)
+        self.assertEqual(node.op, UnaryOperator.NEG)
         self.assertIsInstance(node.operand, VariableRefNode)
 
     def test_parse_parenthesised_addition(self):
@@ -205,10 +205,10 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("(V(out) + V(in)) * 2")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.MUL)
-        self.assertIsInstance(node.left, BinaryOpNode)
-        self.assertEqual(node.left.op, BinaryOp.ADD)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.MUL)
+        self.assertIsInstance(node.left, BinaryOperatorNode)
+        self.assertEqual(node.left.op, BinaryOperator.ADD)
 
     def test_parse_db_ratio(self):
         # arrange — "db(V(out)/V(in))" from the issue examples
@@ -219,8 +219,8 @@ class TestExpressionParser(TestCase):
         self.assertIsInstance(node, FunctionCallNode)
         self.assertEqual(node.name.lower(), "db")
         inner = node.args[0]
-        self.assertIsInstance(inner, BinaryOpNode)
-        self.assertEqual(inner.op, BinaryOp.DIV)
+        self.assertIsInstance(inner, BinaryOperatorNode)
+        self.assertEqual(inner.op, BinaryOperator.DIV)
 
     def test_parse_error_unexpected_character(self):
         # arrange
@@ -258,10 +258,10 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("(2*pi*Frequency)")
         # assert
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.MUL)
-        self.assertIsInstance(node.left, BinaryOpNode)
-        self.assertEqual(node.left.op, BinaryOp.MUL)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.MUL)
+        self.assertIsInstance(node.left, BinaryOperatorNode)
+        self.assertEqual(node.left.op, BinaryOperator.MUL)
         self.assertIsInstance(node.left.left, NumberNode)
         self.assertEqual(node.left.left.value, 2.0)
         self.assertIsInstance(node.left.right, VariableRefNode)
@@ -275,10 +275,10 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("(1mho*V(out,0))")
         # assert — outer is multiplication, left is implicit 1*mho, right is V(out, 0)
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.MUL)
-        self.assertIsInstance(node.left, BinaryOpNode)
-        self.assertEqual(node.left.op, BinaryOp.MUL)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.MUL)
+        self.assertIsInstance(node.left, BinaryOperatorNode)
+        self.assertEqual(node.left.op, BinaryOperator.MUL)
         self.assertIsInstance(node.left.left, NumberNode)
         self.assertEqual(node.left.left.value, 1.0)
         self.assertIsInstance(node.left.right, VariableRefNode)
@@ -293,10 +293,10 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("(1e-05mho*V(in,n06))")
         # assert — outer is multiplication, left is implicit 1e-05*mho, right is V(in, n06)
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.MUL)
-        self.assertIsInstance(node.left, BinaryOpNode)
-        self.assertEqual(node.left.op, BinaryOp.MUL)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.MUL)
+        self.assertIsInstance(node.left, BinaryOperatorNode)
+        self.assertEqual(node.left.op, BinaryOperator.MUL)
         self.assertIsInstance(node.left.left, NumberNode)
         self.assertAlmostEqual(node.left.left.value, 1e-05)
         self.assertIsInstance(node.left.right, VariableRefNode)
@@ -332,8 +332,8 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("(2.5mho*V(26a\u2022x1\u2022xt301,0))")
         # assert — outer is multiplication, left is 2.5*mho, right is the probe
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.MUL)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.MUL)
         self.assertIsInstance(node.right, VariableRefNode)
         # digit-starting tokens (NUMBER) and IDENT tokens are joined verbatim in raw arg context
         self.assertEqual(node.right.name, "V(26a\u2022x1\u2022xt301, 0)")
@@ -344,7 +344,7 @@ class TestExpressionParser(TestCase):
         # act
         node = parser.parse("(1*I(VF_F1\u2022X_F1\u2022XU305))")
         # assert — outer is multiplication, right is the current probe with bullet path
-        self.assertIsInstance(node, BinaryOpNode)
-        self.assertEqual(node.op, BinaryOp.MUL)
+        self.assertIsInstance(node, BinaryOperatorNode)
+        self.assertEqual(node.op, BinaryOperator.MUL)
         self.assertIsInstance(node.right, VariableRefNode)
         self.assertEqual(node.right.name, "I(VF_F1\u2022X_F1\u2022XU305)")

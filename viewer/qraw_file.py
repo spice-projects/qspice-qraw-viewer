@@ -86,22 +86,14 @@ _MODE_TO_CHART: dict[str, str] = {
     "dc": "DC",
     "op": "DC",
     "noise": "AC",
+    # custom, not part of the QRAW specification
+    "fft": "FFT"
 }
-
-
-def _chart_type_for_file(abscissa: Expression) -> str:
-    # type unambiguously determines the chart layout
-    if abscissa.unit == "Hz":
-        return "AC"
-    if abscissa.unit == "s":
-        return "TRANSIENT"
-    # VOLTAGE (DC transfer sweep) and PARAMETER (operating point sweep) both use the DC layout
-    return "DC"
 
 
 class QRawFile:
 
-    def __init__(self, filename: Path, title: str, date: str, plotname: str, complex: bool, steps: int, abscissa: Expression, abscissa_scale: AbscissaScale, command: str, plot_suggestion: str, expression_manager: ExpressionManager, _mmap: mmap.mmap | None = None):
+    def __init__(self, filename: Path, title: str, date: str, plotname: str, complex: bool, steps: int, abscissa: Expression, abscissa_scale: AbscissaScale, command: str, plot_suggestion: str, expression_manager: ExpressionManager, _mmap: mmap.mmap | None = None, chart_type: str | None = None):
         # fields
         self._filename = filename
         self._title = title
@@ -119,6 +111,8 @@ class QRawFile:
         # calculated
         self._abscissa_points = len(abscissa.data)
         self._plot_suggestions: list[PlotSuggestion] | None = None
+        # pre-determined chart type
+        self._chart_type = chart_type
 
     @property
     def filename(self) -> Path:
@@ -153,6 +147,19 @@ class QRawFile:
         return self._abscissa_scale
 
     @property
+    def chart_type(self) -> str:
+        # check initialized chart type
+        if self._chart_type is not None:
+            return self._chart_type
+        # type unambiguously determines the chart layout
+        if self._abscissa.unit == "Hz":
+            return "AC"
+        if self._abscissa.unit == "s":
+            return "TRANSIENT"
+        # VOLTAGE (DC transfer sweep) and PARAMETER (operating point sweep) both use the DC layout
+        return "DC"
+
+    @property
     def command(self) -> str:
         return self._command
 
@@ -167,7 +174,7 @@ class QRawFile:
         # calculate plot suggestions
         if self._plot_suggestions is None:
             # file chart type
-            file_chart_type = _chart_type_for_file(self._abscissa)
+            file_chart_type = self.chart_type
             # plot suggestions
             self._plot_suggestions = []
             # extract each «...» group in order, ``\xab``/``\xbb`` are the «» characters; using a raw string avoids accidental escaping.
@@ -236,12 +243,16 @@ class QRawFile:
                     break
                 # line: decode header text using Windows-1252
                 line = data[pos:newline].decode("cp1252").strip()
+                # log information
+                logger.debug(">> %s", line)
                 # advance position to next line
                 pos = newline + 1
                 # state machine to parse header and variables until binary section is reached
                 if in_variables:
                     # check for end of variables section
                     if line == "Binary:":
+                        # log information
+                        logger.debug(">> ...")
                         # binary section starts at the current position in the file
                         binary_offset = pos
                         # exit loop
