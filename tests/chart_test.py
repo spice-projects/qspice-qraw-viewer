@@ -1,6 +1,6 @@
 import sys
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import numpy as np
 
@@ -181,7 +181,7 @@ class TestChart(TestCase):
         axis = chart._get_y_axis("V")
         # assert
         self.assertIsNotNone(axis)
-        component.createYAxis.assert_called_once_with("Y Axis 1", "V")
+        component.createYAxis.assert_called_once_with(ANY, "V")
 
     def test_get_y_axis_reuses_existing_axis(self):
         # arrange
@@ -404,7 +404,7 @@ class TestChart(TestCase):
         with patch("viewer.chart.decimate_xy", return_value=(decimated_x, decimated_y)):
             chart.plot_series({vout})
         # assert
-        component.plotSeries.assert_called_once()
+        component.updateGraphsView.assert_called_once()
 
     def test_plot_series_skips_already_tracked_expression(self):
         # arrange
@@ -428,15 +428,20 @@ class TestChart(TestCase):
         abscissa = Expression("Time", values, "s")
         chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
         vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        y_axis = MagicMock()
+        y_axis.property.return_value = "V"
+        chart._y_axes["V"] = y_axis
+        chart._y_axes_ref_counts[y_axis] = 1
+        chart._left_y_axis_1 = y_axis
         # inject an existing series that is absent from the new expression set
-        chart._series["Vout"] = (vout, [(vout, MagicMock(), [MagicMock()], 0.0, 5.0)])
+        chart._series["Vout"] = (vout, [(vout, y_axis, [MagicMock()], 0.0, 5.0)])
         chart._expressions.append(vout)
         # act — empty set means all existing series should be removed
         chart.plot_series(set())
         # assert
         self.assertNotIn("Vout", chart._series)
         self.assertNotIn(vout, chart.expressions)
-        component.plotSeries.assert_called_once()
+        component.updateGraphsView.assert_called_once()
 
     def test_plot_series_creates_one_series_entry_per_step(self):
         # arrange
@@ -475,9 +480,9 @@ class TestChart(TestCase):
         values = np.linspace(0.0, 1.0, 10)
         abscissa = Expression("Time", values, "s")
         mock_manager = MagicMock()
-        magnitude_expr = Expression("abs(Vout)", np.ones(10), "V")
-        phase_expr = Expression("angle(Vout)", np.zeros(10), "deg")
-        mock_manager.evaluate.side_effect = lambda expr: magnitude_expr if "abs" in expr else phase_expr
+        magnitude_expr = Expression("db(Vout)", np.ones(10), "dB")
+        phase_expr = Expression("phase(Vout)", np.zeros(10), "deg")
+        mock_manager.evaluate.side_effect = lambda expr: magnitude_expr if expr == "db(Vout)" else phase_expr
         chart = Chart(component, "AC", mock_manager, abscissa, 0, 10, 1, 500)
         vout = Expression("Vout", np.ones(10, dtype=np.complex128), "V")
         # act
@@ -486,6 +491,8 @@ class TestChart(TestCase):
         self.assertEqual(len(result), 2)
         self.assertIs(result[0], magnitude_expr)
         self.assertIs(result[1], phase_expr)
+        self.assertEqual(mock_manager.evaluate.call_args_list[0].args, ("db(Vout)",))
+        self.assertEqual(mock_manager.evaluate.call_args_list[1].args, ("phase(Vout)",))
 
     def test_get_expressions_to_plot_complex_returns_empty_when_magnitude_fails(self):
         # arrange
@@ -508,15 +515,105 @@ class TestChart(TestCase):
         values = np.linspace(0.0, 1.0, 10)
         abscissa = Expression("Time", values, "s")
         mock_manager = MagicMock()
-        magnitude_expr = Expression("abs(Vout)", np.ones(10), "V")
+        magnitude_expr = Expression("db(Vout)", np.ones(10), "dB")
         # magnitude succeeds but phase lookup fails
-        mock_manager.evaluate.side_effect = lambda expr: magnitude_expr if "abs" in expr else None
+        mock_manager.evaluate.side_effect = lambda expr: magnitude_expr if expr == "db(Vout)" else None
         chart = Chart(component, "AC", mock_manager, abscissa, 0, 10, 1, 500)
         vout = Expression("Vout", np.ones(10, dtype=np.complex128), "V")
         # act
         result = chart._get_expressions_to_plot(vout)
         # assert
         self.assertEqual(result, [])
+
+    def test_clear_resets_axis_slot_references(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 100)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 100, 1, 500)
+        chart._left_y_axis_1 = MagicMock()
+        chart._right_y_axis_1 = MagicMock()
+        chart._left_y_axis_2 = MagicMock()
+        chart._right_y_axis_2 = MagicMock()
+        # act
+        chart.clear()
+        # assert
+        self.assertIsNone(chart._left_y_axis_1)
+        self.assertIsNone(chart._right_y_axis_1)
+        self.assertIsNone(chart._left_y_axis_2)
+        self.assertIsNone(chart._right_y_axis_2)
+
+    def test_release_y_axis_returns_false_while_axis_still_shared(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        axis = MagicMock()
+        axis.property.return_value = "V"
+        chart._left_y_axis_1 = axis
+        chart._y_axes["V"] = axis
+        chart._y_axes_ref_counts[axis] = 2
+        # act
+        result = chart._release_y_axis(axis)
+        # assert
+        self.assertFalse(result)
+        self.assertEqual(chart._y_axes_ref_counts[axis], 1)
+        self.assertIs(chart._left_y_axis_1, axis)
+
+    def test_release_y_axis_clears_internal_axis_reference_when_unused(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        axis = MagicMock()
+        axis.property.return_value = "V"
+        chart._left_y_axis_1 = axis
+        chart._y_axes["V"] = axis
+        chart._y_axes_ref_counts[axis] = 1
+        # act
+        result = chart._release_y_axis(axis)
+        # assert
+        self.assertTrue(result)
+        self.assertEqual(chart._y_axes, {})
+        self.assertEqual(chart._y_axes_ref_counts, {})
+        self.assertIsNone(chart._left_y_axis_1)
+
+    def test_plot_series_updates_graphs_view_with_rendered_series(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        decimated_x = np.linspace(0.0, 1.0, 10)
+        decimated_y = np.linspace(0.0, 5.0, 10)
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(decimated_x, decimated_y)):
+            chart.plot_series({vout})
+        # assert
+        rendered, removed = component.updateGraphsView.call_args.args
+        self.assertEqual(len(rendered), 1)
+        self.assertEqual(rendered[0][0], "Vout")
+        self.assertEqual(removed, [])
+
+    def test_plot_series_sets_series_width_to_two(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        decimated_x = np.linspace(0.0, 1.0, 10)
+        decimated_y = np.linspace(0.0, 5.0, 10)
+        mock_series = MagicMock()
+        # act
+        with patch("viewer.chart.QLineSeries", return_value=mock_series):
+            with patch("viewer.chart.decimate_xy", return_value=(decimated_x, decimated_y)):
+                chart.plot_series({vout})
+        # assert
+        mock_series.setWidth.assert_called_once_with(2)
 
     def test_redraw_all_series_calls_resize_abscissa(self):
         # arrange

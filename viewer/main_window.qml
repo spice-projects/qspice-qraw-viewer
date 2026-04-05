@@ -157,138 +157,38 @@ Item {
                 }
             }
 
-            // axisY: ValueAxis {
-            //     id: axisYLeft1
-            //     lineVisible: true
-            //     labelsVisible: true
-            //     titleVisible: false
-            //     titleText: ""
-            //     alignment: Qt.AlignLeft
-
-            //     property string yUnit: ""
-
-            //     labelDelegate: Item {
-
-            //         property string text: ""
-
-            //         Text {
-            //             anchors.fill: parent
-            //             color: "#b0b8c8"
-            //             font.pixelSize: 10
-            //             horizontalAlignment: Text.AlignRight
-            //             verticalAlignment: Text.AlignVCenter
-            //             text: graphsView.linearValueFormatter(axisYLeft1.yUnit, parent.text)
-            //         }
-            //     }
-            // }
-
-            // ValueAxis {
-            //     id: axisYLeft2
-            //     lineVisible: true
-            //     labelsVisible: true
-            //     titleVisible: false
-            //     titleText: ""
-            //     alignment: Qt.AlignLeft
-
-            //     property string yUnit: ""
-
-            //     labelDelegate: Item {
-
-            //         property string text: ""
-
-            //         Text {
-            //             anchors.fill: parent
-            //             color: "#b0b8c8"
-            //             font.pixelSize: 10
-            //             horizontalAlignment: Text.AlignRight
-            //             verticalAlignment: Text.AlignVCenter
-            //             text: graphsView.linearValueFormatter(axisYLeft2.yUnit, parent.text)
-            //         }
-            //     }
-            // }
-
-            // ValueAxis {
-            //     id: axisYRight1
-            //     lineVisible: true
-            //     labelsVisible: true
-            //     titleVisible: false
-            //     titleText: ""
-            //     alignment: Qt.AlignRight
-
-            //     property string yUnit: ""
-
-            //     labelDelegate: Item {
-
-            //         property string text: ""
-
-            //         Text {
-            //             anchors.fill: parent
-            //             color: "#b0b8c8"
-            //             font.pixelSize: 10
-            //             horizontalAlignment: Text.AlignLeft
-            //             verticalAlignment: Text.AlignVCenter
-            //             text: graphsView.linearValueFormatter(axisYRight1.yUnit, parent.text)
-            //         }
-            //     }
-            // }
-
-            // ValueAxis {
-            //     id: axisYRight2
-            //     lineVisible: true
-            //     labelsVisible: true
-            //     titleVisible: false
-            //     titleText: ""
-            //     alignment: Qt.AlignRight
-
-            //     property string yUnit: ""
-
-            //     labelDelegate: Item {
-
-            //         property string text: ""
-
-            //         Text {
-            //             anchors.fill: parent
-            //             color: "#b0b8c8"
-            //             font.pixelSize: 10
-            //             horizontalAlignment: Text.AlignLeft
-            //             verticalAlignment: Text.AlignVCenter
-            //             text: graphsView.linearValueFormatter(axisYRight2.yUnit, parent.text)
-            //         }
-            //     }
-            // }
-
             function applyUnit(unit, text, value) {
                 // absolute value for prefix selection
                 const absValue = Math.abs(value);
                 // giga
                 if (absValue >= 1e9)
-                    return (value / 1e9).toFixed(2) + " G" + unit;
+                    return (value / 1e9).toFixed(1) + "G" + unit;
                 // mega
                 if (absValue >= 1e6)
-                    return (value / 1e6).toFixed(2) + " M" + unit;
+                    return (value / 1e6).toFixed(1) + "M" + unit;
                 // kilo
                 if (absValue >= 1e3)
-                    return (value / 1e3).toFixed(2) + " k" + unit;
+                    return (value / 1e3).toFixed(1) + "k" + unit;
                 // base unit
                 if (absValue >= 1.0)
-                    return value.toFixed(2) + " " + unit;
+                    return value.toFixed(1) + unit;
                 // zero
                 if (absValue < 1e-15)
-                    return "0 " + unit;
+                    return "0" + unit;
                 // femto
                 if (absValue < 1e-12)
-                    return (value * 1e15).toFixed(2) + " f" + unit;
+                    return (value * 1e15).toFixed(1) + "f" + unit;
                 // pico
                 if (absValue < 1e-9)
-                    return (value * 1e12).toFixed(2) + " p" + unit;
+                    return (value * 1e12).toFixed(1) + "p" + unit;
                 // nano
                 if (absValue < 1e-6)
-                    return (value * 1e9).toFixed(2) + " n" + unit;
+                    return (value * 1e9).toFixed(1) + "n" + unit;
                 // micro
                 if (absValue < 1e-3)
-                    return (value * 1e6).toFixed(2) + " µ" + unit;
+                    return (value * 1e6).toFixed(1) + "µ" + unit;
                 // milli
-                return (value * 1e3).toFixed(2) + " m" + unit;
+                return (value * 1e3).toFixed(1) + "m" + unit;
             }
 
             function linearValueFormatter(unit, text) {
@@ -528,14 +428,12 @@ Item {
             axisX.max = axisXMaxValue;
         }
 
-        function createYAxis(alignment, unit, defaultAxis) {
+        function createYAxis(alignment, unit) {
             // create and return a new ValueAxis instance from the component
             const axis = yAxisComponent.createObject(graphsView);
             // set property values
             axis.alignment = alignment;
             axis.yUnit = unit;
-            // add axis to view
-            // graphsView.addAxis(axis);
             // use axis
             return axis;
         }

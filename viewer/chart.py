@@ -75,7 +75,7 @@ class Chart:
         series_to_remove: list[tuple[str, list[QLineSeries]]] = []
         # labels to remove from the chart
         labels_to_remove: list[str] = []
-        # axis to remove
+        # axis to remove, prevent GC until Qt finishes its async processing of the series removals that triggered these axis removals
         axes_to_remove: list[QAbstractAxis] = []
         # loop existing series to find those that need to be removed (those whose expression is not in the new expressions list)
         for label, (expression, ordinate_series) in self._series.items():
@@ -131,9 +131,12 @@ class Chart:
                     # update x and y with finite values only
                     x_np = x_np[finite_mask]
                     y_np = y_np[finite_mask]
+                    # check all values were non-finite after filtering
+                    if x_np.size == 0 or y_np.size == 0:
+                        continue
                     # create series and hand buffers directly to Qt — no Python loop
                     series = QLineSeries()
-                    series.setWidth(1)
+                    series.setWidth(2)
                     series.replaceNp(x_np, y_np)
                     series.setAxisY(y_axis)
                     # append to lists
@@ -240,8 +243,8 @@ class Chart:
 
     def clear(self):
         # Qt enqueues the visual removal of series asynchronously. Python owns the QLineSeries, so we must NOT let Python GC them until Qt has finished processing the removal queue.
-        old_y_axes = self._y_axes
         old_series = self._series
+        old_y_axes = self._y_axes
         old_expressions = self._expressions
         # reset internal state
         self._series = {}
@@ -252,6 +255,11 @@ class Chart:
         self._zoom_window = (self._zoom_window[0], 0.0, self._zoom_window[2], 1.0)
         # enqueue Qt-side removal
         self._component.removeAllSeries()
+        # remove axis references
+        self._left_y_axis_1 = None
+        self._right_y_axis_1 = None
+        self._left_y_axis_2 = None
+        self._right_y_axis_2 = None
         # release stash after Qt finishes its async processing
         QTimer.singleShot(1000, lambda: (old_series.clear(), old_y_axes.clear(), old_expressions.clear()))
 
@@ -286,22 +294,12 @@ class Chart:
             return [expression]
         # check chart type
         if self._chart_type == "AC":
-            # dB conversion multiplier (V, A, W)
-            multiplier = 20 if (expression.unit == "V" or expression.unit == "A") else 10 if expression.unit == "W" else 1
-            # check expression is non-zero to avoid issues with log(0) when calculating magnitude
-            if np.all(np.abs(expression.data) <= 1e-12):
-                # phase
-                phase_expression = self._expression_manager.evaluate(f"angle({expression.name})", f"Angle({expression.name})")
-                if not phase_expression:
-                    return []
-                # exit with phase only
-                return [phase_expression]
             # magnitude
-            magnitude_expression = self._expression_manager.evaluate(f"{multiplier}*log(abs({expression.name}))", f"Abs({expression.name})")
+            magnitude_expression = self._expression_manager.evaluate(f"db({expression.name})")
             if not magnitude_expression:
                 return []
             # phase
-            phase_expression = self._expression_manager.evaluate(f"angle({expression.name})", f"Angle({expression.name})")
+            phase_expression = self._expression_manager.evaluate(f"phase({expression.name})")
             if not phase_expression:
                 return []
             # exit
@@ -368,7 +366,7 @@ class Chart:
         # left (main)
         if self._left_y_axis_1 is None:
             # create axis
-            self._left_y_axis_1 = self._component.createYAxis(Qt.AlignmentFlag.AlignLeft, unit, True)
+            self._left_y_axis_1 = self._component.createYAxis(Qt.AlignmentFlag.AlignLeft, unit)
             # register axis
             self._y_axes[unit] = self._left_y_axis_1
             self._y_axes_ref_counts[self._left_y_axis_1] = 1
@@ -377,7 +375,7 @@ class Chart:
         # right (main)
         if self._right_y_axis_1 is None:
             # create axis
-            self._right_y_axis_1 = self._component.createYAxis(Qt.AlignmentFlag.AlignRight, unit, False)
+            self._right_y_axis_1 = self._component.createYAxis(Qt.AlignmentFlag.AlignRight, unit)
             # register axis
             self._y_axes[unit] = self._right_y_axis_1
             self._y_axes_ref_counts[self._right_y_axis_1] = 1
@@ -386,7 +384,7 @@ class Chart:
         # left (secondary)
         if self._left_y_axis_2 is None:
             # create axis
-            self._left_y_axis_2 = self._component.createYAxis(Qt.AlignmentFlag.AlignLeft, unit, False)
+            self._left_y_axis_2 = self._component.createYAxis(Qt.AlignmentFlag.AlignLeft, unit)
             # register axis
             self._y_axes[unit] = self._left_y_axis_2
             self._y_axes_ref_counts[self._left_y_axis_2] = 1
@@ -395,7 +393,7 @@ class Chart:
         # right (secondary)
         if self._right_y_axis_2 is None:
             # create axis
-            self._right_y_axis_2 = self._component.createYAxis(Qt.AlignmentFlag.AlignRight, unit, False)
+            self._right_y_axis_2 = self._component.createYAxis(Qt.AlignmentFlag.AlignRight, unit)
             # register axis
             self._y_axes[unit] = self._right_y_axis_2
             self._y_axes_ref_counts[self._right_y_axis_2] = 1
@@ -416,6 +414,15 @@ class Chart:
             # remove from tracked axes
             del self._y_axes_ref_counts[axis]
             del self._y_axes[unit]
+            # release the internal reference
+            if axis == self._left_y_axis_1:
+                self._left_y_axis_1 = None
+            elif axis == self._right_y_axis_1:
+                self._right_y_axis_1 = None
+            elif axis == self._left_y_axis_2:
+                self._left_y_axis_2 = None
+            elif axis == self._right_y_axis_2:
+                self._right_y_axis_2 = None
             # remove from chart
             return True
         # exit

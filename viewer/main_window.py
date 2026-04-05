@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
         # so Jupyter always opens the original .qraw file
         self._qraw_path = source_qraw_path if source_qraw_path is not None else qraw_file.filename
         # set window title to include the loaded filename
-        self.setWindowTitle(f"QSPICE - {qraw_file.filename.name}")
+        self.setWindowTitle(f"{self._default_chart_type} - {qraw_file.filename.name}")
         # apply dark background stylesheet to the window chrome
         self.setStyleSheet(f"QMainWindow {{ background: {_BG}; }}")
         # initialize data structures
