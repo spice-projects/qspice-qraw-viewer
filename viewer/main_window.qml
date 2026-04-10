@@ -9,17 +9,8 @@ Item {
 
     property int _activeChartIndex: -1
     property int _activeChartSeriesCount: 0
-    property bool _activeChartIsTimeDomain: false
-
-    readonly property var seriesColorPalette: ["#f77f00"  // orange
-        , "#00b4d8"  // cyan
-        , "#80ff72"  // green
-        , "#e040fb"  // purple
-        , "#ffdd00"  // yellow
-        , "#ff4365"  // red
-        , "#00f5d4"  // teal
-        , "#bbdefb"  // pale blue
-        ,]
+    property bool fftEnabled: false
+    property bool stepToolEnabled: false
 
     signal horizontalZoom(int chartIndex, real xLeftRatio, real xRightRatio, real zoomFactor)
     signal verticalZoom(int chartIndex, real yTopRatio, real yBottomRatio)
@@ -31,16 +22,16 @@ Item {
     signal menuAddWindow(int chartIndex)
     signal menuDeleteWindow(int chartIndex)
     signal menuFft(int chartIndex)
+    signal menuStepTool(int chartIndex)
     signal pointerMoved(int chartIndex, real xRatio)
     signal pointerExited(int chartIndex)
 
     component ChartPanel: Item {
         id: panel
 
-        // index of this panel in the chartsModel — set by the Repeater delegate
+        // index of this panel in the chartsModel - set by the Repeater delegate
         required property int chartIndex
 
-        property int seriesCounter: 0
         property int seriesCount: legendModel.count
         property bool legendVisible: false
         readonly property real plotAreaWidth: graphsView.plotArea.width
@@ -54,7 +45,7 @@ Item {
         signal menuDeleteAllPlots
         signal menuDeleteWindow
         // carries panel-local mouse coords so the root can position the shared menu
-        signal menuOpenRequested(real localX, real localY, int seriesCount, bool isTimeDomain)
+        signal menuOpenRequested(real localX, real localY, int seriesCount)
         signal pointerMoved(real xRatio)
         signal pointerExited
 
@@ -77,17 +68,6 @@ Item {
             onTriggered: panel.legendVisible = true
         }
 
-        // series colors mirror the theme's seriesColors array — index cycles modulo length
-        readonly property var seriesColorPalette: ["#f77f00"  // orange
-            , "#00b4d8"  // cyan
-            , "#80ff72"  // green
-            , "#e040fb"  // purple
-            , "#ffdd00"  // yellow
-            , "#ff4365"  // red
-            , "#00f5d4"  // teal
-            , "#bbdefb"  // pale blue
-            ,]
-
         GraphsView {
             id: graphsView
             marginLeft: 30
@@ -108,7 +88,6 @@ Item {
                 theme: GraphsTheme.Theme.UserDefined
                 backgroundColor: "#1a1b1e"
                 plotAreaBackgroundColor: "#0d0e10"
-                seriesColors: panel.seriesColorPalette
                 colorStyle: GraphsTheme.ColorStyle.Uniform
                 labelTextColor: "#b0b8c8"
                 labelFont.pixelSize: 10
@@ -310,7 +289,7 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.RightButton
-                onClicked: mouse => panel.menuOpenRequested(mouse.x, mouse.y, panel.seriesCount, graphsView.xUnit === "s")
+                onClicked: mouse => panel.menuOpenRequested(mouse.x, mouse.y, panel.seriesCount)
             }
 
             // mouse-wheel — X zoom toward cursor (plain), Y zoom toward cursor (Alt held)
@@ -453,26 +432,20 @@ Item {
                 const current = seriesToAdd[i];
                 // series name & data
                 const name = current[0];
-                const data = current[1];
-                // compute color index and color from palette using monotonic counter — never changes on removal
-                const colorIndex = seriesCounter % seriesColorPalette.length;
-                const seriesColor = seriesColorPalette[colorIndex];
-                // increment counter before adding so the next series gets a different slot
-                seriesCounter++;
+                const color = current[1];
+                const data = current[2];
                 // loop series lines
                 for (var j = 0; j < data.length; j++) {
                     // series
                     const series = data[j];
                     // set line color from the palette
-                    series.color = seriesColor;
+                    series.color = color;
                     // append to chart
                     graphsView.addSeries(series);
                 }
-                // append legend entry with the same color
-                legendModel.append({
-                    seriesName: name,
-                    seriesColor: seriesColor
-                });
+                // append legend entry with the same color (if defined, appending a step in a series will use existing legend)
+                if (name != null)
+                    legendModel.append({ seriesName: name, seriesColor: color });
             }
             // loop series to remove
             for (var i = 0; i < seriesToRemove.length; i++) {
@@ -488,14 +461,17 @@ Item {
                     // remove from chart
                     graphsView.removeSeries(series);
                 }
-                // loop legend entries
-                for (var j = legendModel.count - 1; j >= 0; j--) {
-                    // compare name to find the matching legend entry to remove
-                    if (legendModel.get(j)["seriesName"] === name) {
-                        // remove legend entry with matching name
-                        legendModel.remove(j);
-                        // exit loop
-                        break;
+                // check we need to process legend removal, removing steps from series should not remove the legend entry until all steps are removed
+                if (name !== null) {
+                    // loop legend entries
+                    for (var j = legendModel.count - 1; j >= 0; j--) {
+                        // compare name to find the matching legend entry to remove
+                        if (legendModel.get(j)["seriesName"] === name) {
+                            // remove legend entry with matching name
+                            legendModel.remove(j);
+                            // exit loop
+                            break;
+                        }
                     }
                 }
             }
@@ -512,8 +488,6 @@ Item {
                 graphsView.removeSeries(i);
             // clear the legend
             legendModel.clear();
-            // reset counter
-            seriesCounter = 0;
             // reset default Y axis
             graphsView.axisY = null;
         }
@@ -554,12 +528,11 @@ Item {
                 onPointerMoved: xRatio => root.pointerMoved(index, xRatio)
                 onPointerExited: root.pointerExited(index)
                 // position and reveal the single shared context menu on right-click
-                onMenuOpenRequested: (localX, localY, sc, itd) => {
+                onMenuOpenRequested: (localX, localY, sc) => {
                     // map from panel-local coordinates to root-local coordinates
                     var pt = mapToItem(root, localX, localY);
                     root._activeChartIndex = index;
                     root._activeChartSeriesCount = sc;
-                    root._activeChartIsTimeDomain = itd;
                     // clamp so the menu never overflows the root boundary
                     contextMenu.x = Math.min(pt.x, root.width - contextMenu.width - 2);
                     contextMenu.y = Math.min(pt.y, root.height - contextMenu.height - 2);
@@ -622,8 +595,13 @@ Item {
             ContextMenuSeparator {}
             ContextMenuItem {
                 itemText: "FFT..."
-                enabled: root._activeChartIsTimeDomain && root._activeChartSeriesCount > 0
+                enabled: root.fftEnabled && root._activeChartSeriesCount > 0
                 onTriggered: root.menuFft(root._activeChartIndex)
+            }
+            ContextMenuItem {
+                itemText: "Step Tool..."
+                enabled: root.stepToolEnabled
+                onTriggered: root.menuStepTool(root._activeChartIndex)
             }
             ContextMenuSeparator {}
             ContextMenuItem {

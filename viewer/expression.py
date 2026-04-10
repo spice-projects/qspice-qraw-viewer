@@ -9,13 +9,14 @@ class Expression:
     typed interactively by the user, or loaded directly from the QRAW file.
     """
 
-    def __init__(self, name: str, data: np.ndarray, unit: str, source: str | None = None):
+    def __init__(self, name: str, data: np.ndarray, unit: str, source: str | None = None, variable_type: str | None = None):
         # fields
         self._name = name
         self._data = data
         self._unit = unit
         self._complex = data.dtype == np.complex128
         self._source = source
+        self._variable_type = variable_type
 
     @property
     def name(self) -> str:
@@ -41,3 +42,8 @@ class Expression:
     def source(self) -> str | None:
         """Original source expression string, if available."""
         return self._source
+
+    @property
+    def variable_type(self) -> str | None:
+        """Original QRAW variable type, when available (e.g. ``"parameter"``)."""
+        return self._variable_type

@@ -66,16 +66,16 @@ def _process_step(abscissa: Expression, num_points: int) -> tuple[int, Expressio
     # calculate the number of steps and points per step based on the period
     steps = num_points // period
     # number of steps and points per step
-    return steps, Expression(abscissa.name, abscissa.data[:period], abscissa.unit, abscissa.source)
+    return steps, Expression(abscissa.name, abscissa.data[:period], abscissa.unit, abscissa.source, abscissa.variable_type)
 
 
 def _process_scale(abscissa: Expression, scale: AbscissaScale) -> Expression:
     # log10
     if scale == AbscissaScale.DECADE:
-        return Expression(abscissa.name, np.log10(abscissa.data), abscissa.unit, abscissa.source)
+        return Expression(abscissa.name, np.log10(abscissa.data), abscissa.unit, abscissa.source, abscissa.variable_type)
     # log2
     if scale == AbscissaScale.OCTAVE:
-        return Expression(abscissa.name, np.log2(abscissa.data), abscissa.unit, abscissa.source)
+        return Expression(abscissa.name, np.log2(abscissa.data), abscissa.unit, abscissa.source, abscissa.variable_type)
     # linear scale doesn't modify the abscissa
     return abscissa
 
@@ -315,16 +315,16 @@ class QRawFile:
                 # abscissa definition
                 abscissa_definition = variable_definitions[0]
                 # abscissa variable expression
-                abscissa_expression = Expression(abscissa_definition[1], matrix["abscissa"], abscissa_definition[2].value.unit, source=None)
+                abscissa_expression = Expression(abscissa_definition[1], matrix["abscissa"], abscissa_definition[2].value.unit, source=None, variable_type=abscissa_definition[2].value.name)
                 # all variable expressions
-                variables = [abscissa_expression] + [Expression(name, matrix["data"][:, idx - 1], var_type.value.unit, source=None) for idx, name, var_type in variable_definitions[1:]]
+                variables = [abscissa_expression] + [Expression(name, matrix["data"][:, idx - 1], var_type.value.unit, source=None, variable_type=var_type.value.name) for idx, name, var_type in variable_definitions[1:]]
             else:
                 # real files store all variables as float64 in a uniform layout; parse binary data into a 2D array with shape (num_points, num_variables)
                 flat = np.frombuffer(data, dtype="<f8", offset=binary_offset)
                 # reshape flat array into a 2D array with shape (num_points, num_variables); the data is stored in row-major order, so each row corresponds to a point and each column corresponds to a variable
                 matrix = flat.reshape(num_points, num_variables)
                 # extract variables
-                variables = [Expression(name, matrix[:, idx], var_type.value.unit, source=None) for idx, name, var_type in variable_definitions]
+                variables = [Expression(name, matrix[:, idx], var_type.value.unit, source=None, variable_type=var_type.value.name) for idx, name, var_type in variable_definitions]
             # create expression manager
             expression_manager = ExpressionManager(variables)
             # process aliasses

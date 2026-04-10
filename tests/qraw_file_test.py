@@ -389,6 +389,56 @@ class TestQRawFile(TestCase):
         # assert — log10 frequency axis must always advance forward
         self.assertTrue(np.all(np.diff(qraw.abscissa.data) >= 0))
 
+    def test_abscissa_variable_type_is_time_for_transient(self):
+        # arrange
+        filename = FIXTURES_DIR / "Buck_COT_TRAN.qraw"
+        # act
+        qraw = QRawFile.load(filename)
+        # assert
+        self.assertEqual(qraw.abscissa.variable_type, "time")
+
+    def test_abscissa_variable_type_is_frequency_for_ac(self):
+        # arrange
+        filename = FIXTURES_DIR / "VRM_GainBW.qraw"
+        # act
+        qraw = QRawFile.load(filename)
+        # assert
+        self.assertEqual(qraw.abscissa.variable_type, "frequency")
+
+    def test_voltage_expressions_have_voltage_type(self):
+        # arrange
+        filename = FIXTURES_DIR / "Buck_COT_TRAN.qraw"
+        qraw = QRawFile.load(filename)
+        # act
+        expressions = qraw.expression_manager.expressions
+        voltage_vars = [e for e in expressions if e.unit == "V"]
+        # assert — all voltage variables must have variable_type "voltage"
+        for var in voltage_vars:
+            self.assertEqual(var.variable_type, "voltage", msg=f"{var.name} should have variable_type 'voltage'")
+
+    def test_current_expressions_have_current_type(self):
+        # arrange
+        filename = FIXTURES_DIR / "Buck_COT_TRAN.qraw"
+        qraw = QRawFile.load(filename)
+        # act — find raw variables with current unit (exclude aliases/derived expressions)
+        raw_count = len([e for e in qraw.expression_manager.expressions if e.variable_type is not None])
+        expressions = qraw.expression_manager.expressions[:raw_count]
+        current_vars = [e for e in expressions if e.unit == "A"]
+        # assert — all raw current variables must have variable_type "current"
+        for var in current_vars:
+            self.assertEqual(var.variable_type, "current", msg=f"{var.name} should have variable_type 'current'")
+
+    def test_power_expressions_have_power_type(self):
+        # arrange
+        filename = FIXTURES_DIR / "UJ3N065080.qraw"
+        qraw = QRawFile.load(filename)
+        # act
+        expressions = qraw.expression_manager.expressions
+        power_vars = [e for e in expressions if e.unit == "W"]
+        # assert — all power variables must have variable_type "power"
+        for var in power_vars:
+            self.assertEqual(var.variable_type, "power", msg=f"{var.name} should have variable_type 'power'")
+
 
 class TestQRawFileLoad(TestCase):
 

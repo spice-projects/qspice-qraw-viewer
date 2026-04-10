@@ -2,6 +2,8 @@ import sys
 from unittest import TestCase
 from unittest.mock import MagicMock
 
+import numpy as np
+
 # mock PySide6 submodules before importing main_window, which requires Qt at import time
 sys.modules.setdefault("PySide6", MagicMock())
 sys.modules.setdefault("PySide6.QtCore", MagicMock())
@@ -15,7 +17,8 @@ sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
 # QMainWindow must be a concrete class so that MainWindow can genuinely inherit from it
 sys.modules["PySide6.QtWidgets"].QMainWindow = type("QMainWindow", (), {})
 
-from viewer.main_window import MainWindow, _format_value, _format_values  # noqa: E402
+from viewer.expression import Expression  # noqa: E402
+from viewer.main_window import MainWindow, _build_step_combinations, _format_value, _format_values  # noqa: E402
 
 
 class TestMainWindow(TestCase):
@@ -187,6 +190,40 @@ class TestFormatValues(TestCase):
         self.assertEqual(result, "I(L1) = [1.00 mA, 2.00 mA]")
 
 
+class TestBuildStepCombinations(TestCase):
+
+    def test_returns_empty_when_single_step(self):
+        # arrange
+        expressions = [Expression("Rload", np.array([1.0]), "", variable_type="parameter")]
+        # act
+        parameter_names, combinations = _build_step_combinations(expressions, 1, 1)
+        # assert
+        self.assertEqual(parameter_names, [])
+        self.assertEqual(combinations, [])
+
+    def test_uses_single_step_abscissa_length_for_parameter_rows(self):
+        # arrange
+        expressions = [
+            Expression("Rload", np.array([10.0, 10.0, 10.0, 10.0, 22.0, 22.0, 22.0, 22.0, 47.0, 47.0, 47.0, 47.0]), "", variable_type="parameter"),
+            Expression("V(out)", np.array([1.0] * 12), "V", variable_type="voltage")
+        ]
+        # act
+        parameter_names, combinations = _build_step_combinations(expressions, 3, 4)
+        # assert
+        self.assertEqual(parameter_names, ["Rload"])
+        self.assertEqual([combination.step_index for combination in combinations], [0, 1, 2])
+        self.assertEqual([combination.values for combination in combinations], [["10"], ["22"], ["47"]])
+
+    def test_returns_empty_when_no_parameter_variables_exist(self):
+        # arrange
+        expressions = [Expression("V(out)", np.array([1.0, 2.0]), "V", variable_type="voltage")]
+        # act
+        parameter_names, combinations = _build_step_combinations(expressions, 3, 2)
+        # assert
+        self.assertEqual(parameter_names, [])
+        self.assertEqual(combinations, [])
+
+
 class TestMainWindowSlots(TestCase):
 
     def _make_win(self, total=20):
@@ -306,6 +343,47 @@ class TestMainWindowSlots(TestCase):
         # assert — first chart removed; second chart remains
         self.assertEqual(len(win._charts), 1)
         self.assertIs(win._charts[0], chart1)
+
+    def test_on_qml_ready_sets_step_tool_enabled_for_stepped_files(self):
+        # arrange
+        win = self._make_win()
+        win._steps = 6
+        win._abscissa = MagicMock(unit="s", data=list(range(20)), values=list(range(20)))
+        win._qml_view = MagicMock()
+        root = MagicMock()
+        win._qml_view.rootObject.return_value = root
+        # act
+        win._on_qml_ready(sys.modules["PySide6.QtQuick"].QQuickView.Status.Ready)
+        # assert
+        root.setProperty.assert_any_call("stepToolEnabled", True)
+
+    def test_on_qml_ready_sets_step_tool_disabled_for_single_step_files(self):
+        # arrange
+        win = self._make_win()
+        win._steps = 1
+        win._abscissa = MagicMock(unit="s", data=list(range(20)), values=list(range(20)))
+        win._qml_view = MagicMock()
+        root = MagicMock()
+        win._qml_view.rootObject.return_value = root
+        # act
+        win._on_qml_ready(sys.modules["PySide6.QtQuick"].QQuickView.Status.Ready)
+        # assert
+        root.setProperty.assert_any_call("stepToolEnabled", False)
+
+    def test_on_qml_ready_converts_numpy_step_bool_to_python_bool(self):
+        # arrange
+        win = self._make_win()
+        win._steps = np.int64(6)
+        win._abscissa = MagicMock(unit="s", data=list(range(20)), values=list(range(20)))
+        win._qml_view = MagicMock()
+        root = MagicMock()
+        win._qml_view.rootObject.return_value = root
+        # act
+        win._on_qml_ready(sys.modules["PySide6.QtQuick"].QQuickView.Status.Ready)
+        # assert
+        value = [args[0][1] for args in root.setProperty.call_args_list if args[0][0] == "stepToolEnabled"][-1]
+        self.assertIs(type(value), bool)
+        self.assertTrue(value)
 
     def test_size_hint_returns_1200_by_800(self):
         # arrange

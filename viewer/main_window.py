@@ -16,6 +16,7 @@ from .fft import FftOutput, compute_fft_many
 from .fft_dialog import FftDialog
 from .jupyter_window import JupyterWindow
 from .qraw_file import AbscissaScale, QRawFile
+from .step_tool_dialog import StepToolDialog
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,62 @@ def _format_values(name: str, values: list[float], unit: str) -> str:
     return f"{name} = [{formatted_values}]"
 
 
+class StepCombination:
+
+    def __init__(self, step_index: int, values: list[str]):
+        # fields
+        self._step_index = step_index
+        self._values = values
+
+    @property
+    def step_index(self) -> int:
+        return self._step_index
+
+    @property
+    def values(self) -> list[str]:
+        return self._values
+
+
+def _format_parameter_value(value: object) -> str:
+    # unpack numpy scalar to built-in scalar when needed
+    if isinstance(value, np.generic):
+        value = value.item()
+    # use compact formatting for floating-point values
+    if isinstance(value, float):
+        return f"{value:.12g}"
+    # fallback string conversion
+    return str(value)
+
+
+def _build_step_combinations(expressions: list[Expression], steps: int, step_points: int) -> tuple[list[str], list[StepCombination]]:
+    # only process parameter combinations when there are multiple steps
+    if steps <= 1:
+        return [], []
+    # parameter expressions from the source QRAW variable list
+    parameter_expressions = [expression for expression in expressions if expression.variable_type == "parameter"]
+    # no parameters swept: return empty
+    if len(parameter_expressions) == 0:
+        return [], []
+    # parameter names for dialog columns
+    parameter_names = [expression.name for expression in parameter_expressions]
+    # all step combinations in original simulation order
+    combinations: list[StepCombination] = []
+    # loop steps
+    for step_index in range(steps):
+        # row values for the current step
+        values: list[str] = []
+        # loop parameter expressions
+        for expression in parameter_expressions:
+            # first value for this step in the flattened expression vector
+            value_index = min(step_index * step_points, len(expression.data) - 1)
+            # append formatted value
+            values.append(_format_parameter_value(expression.data[value_index]))
+        # append combination
+        combinations.append(StepCombination(step_index, values))
+    # exit
+    return parameter_names, combinations
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self, qraw_file: QRawFile, source_qraw_path: Path | None = None):
@@ -93,8 +150,18 @@ class MainWindow(QMainWindow):
         self._abscissa = qraw_file.abscissa
         self._abscissa_scale = qraw_file.abscissa_scale
         self._expression_manager = qraw_file.expression_manager
-        self._steps = qraw_file.steps
+        # normalize numpy scalar to built-in int for stable Qt property marshalling
+        self._steps = int(qraw_file.steps)
         self._plot_suggestions = qraw_file.get_plot_suggestions()
+        # check if we have multiple steps and if so, precompute the step parameter combinations for the step tool dialog; this is done here once to avoid redundant work in the dialog when the user opens it multiple times, and also to keep the dialog code simpler and focused on UI logic rather than data processing
+        if self._steps > 1:
+            # qraw_file already trims the abscissa to a single step period
+            step_points = len(self._abscissa.data)
+            # build step parameter names and combinations for the step tool dialog; these are precomputed here to avoid redundant work in the dialog when the user opens it multiple times
+            self._step_parameter_names, self._step_combinations = _build_step_combinations(self._expression_manager.expressions, self._steps, step_points)
+        else:
+            self._step_parameter_names = []
+            self._step_combinations = []
         # store the simulation file path for use by the Jupyter integration;
         # source_qraw_path overrides when this window displays a derived result (e.g. FFT)
         # so Jupyter always opens the original .qraw file
@@ -139,6 +206,9 @@ class MainWindow(QMainWindow):
             return
         # qml view root object
         self._root = self._qml_view.rootObject()
+        # set window-level menu capability flags using built-in bool to avoid passing numpy.bool_ into QML properties
+        self._root.setProperty("fftEnabled", bool(self._abscissa.unit == "s"))
+        self._root.setProperty("stepToolEnabled", bool(self._steps > 1))
         # connect signals from QML to Python handlers
         self._root.horizontalZoom.connect(self._on_horizontal_zoom)
         self._root.verticalZoom.connect(self._on_vertical_zoom)
@@ -150,6 +220,7 @@ class MainWindow(QMainWindow):
         self._root.menuAddWindow.connect(self._on_menu_add_window)
         self._root.menuDeleteWindow.connect(self._on_menu_delete_window)
         self._root.menuFft.connect(self._on_menu_fft)
+        self._root.menuStepTool.connect(self._on_menu_step_tool)
         # connect pointer hover signals to update the status bar
         self._root.pointerMoved.connect(self._on_pointer_moved)
         self._root.pointerExited.connect(self._on_pointer_exited)
@@ -371,6 +442,28 @@ class MainWindow(QMainWindow):
         # delete chart at index (do ot swap these two statements, C++ objects get deleted immediately when their Python reference is deleted, so we need to remove the chart from the UI before deleting the Python object)
         self._root.removeChart(chart_index)
         del self._charts[chart_index]
+
+    @Slot(int)
+    def _on_menu_step_tool(self, chart_index: int):
+        # log information
+        logger.debug("User requested step tool on chart at index: %d", chart_index)
+        # check the chart index is valid
+        if chart_index < 0 or chart_index >= len(self._charts):
+            return
+        # dialog rows built from precomputed parameter combinations
+        step_rows = [{"stepIndex": combination.step_index, "values": combination.values} for combination in self._step_combinations]
+        # get selected steps for this chart
+        chart = self._charts[chart_index]
+        selected_steps = sorted(chart.selected_steps)
+        # open step tool dialog
+        dialog = StepToolDialog(self._step_parameter_names, step_rows, selected_steps, self)
+        # exit if the user canceled
+        if dialog.exec() != StepToolDialog.DialogCode.Accepted:
+            return
+        # store chart-local selected steps for later filtering phase
+        chart.selected_steps = dialog.selected_steps
+        # auto range axes
+        chart.auto_range()
 
     @Slot(int)
     def _on_menu_fft(self, chart_index: int):
