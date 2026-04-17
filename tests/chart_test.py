@@ -60,6 +60,41 @@ class TestChart(TestCase):
         # assert — no axis interaction when there are no series
         component.createYAxis.assert_not_called()
 
+    def test_selected_steps_setter_noop_when_selection_unchanged(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        chart.plot_series = MagicMock()
+        # act
+        chart.selected_steps = {0}
+        # assert
+        chart.plot_series.assert_not_called()
+
+    def test_selected_steps_getter_returns_current_selection(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        # act
+        selected_steps = chart.selected_steps
+        # assert
+        self.assertEqual(selected_steps, {0})
+
+    def test_selected_steps_setter_replots_when_selection_changes(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        chart.plot_series = MagicMock()
+        # act
+        chart.selected_steps = set()
+        # assert
+        chart.plot_series.assert_called_once_with([])
+
     def test_auto_range_calls_set_range_on_axis(self):
         # arrange
         component = MagicMock()
@@ -72,8 +107,8 @@ class TestChart(TestCase):
         chart._series = {"Vout": (vout, {vout: (mock_y_axis, {}, -1.0, 5.0, "#f77f00")})}
         # act
         chart.auto_range()
-        # assert — setRange must be called with the full min/max since zoom is at default (0.0, 1.0)
-        mock_y_axis.setRange.assert_called_once_with(-1.0, 5.0)
+        # assert — autorange applies 3% padding on both sides
+        mock_y_axis.setRange.assert_called_once_with(-1.18, 5.18)
 
     def test_auto_range_respects_vertical_zoom(self):
         # arrange
@@ -89,8 +124,8 @@ class TestChart(TestCase):
         chart.update_zoom_window(-1, -1, 0.0, 0.25)
         # act
         chart.auto_range()
-        # assert — range = 6.0, top 25% means upper bound = -1.0 + 0.25 * 6.0 + 1%(6.0) = 0.56
-        mock_y_axis.setRange.assert_called_with(-1.0, 5.0)
+        # assert — autorange uses series min/max and applies 3% padding
+        mock_y_axis.setRange.assert_called_with(-1.18, 5.18)
 
     def test_update_zoom_window_vertical_only(self):
         # arrange
@@ -284,11 +319,11 @@ class TestChart(TestCase):
         vout = Expression("Vout", np.arange(11, dtype=float), "V")
         mock_y_axis = MagicMock()
         chart._series["Vout"] = (vout, {vout: (mock_y_axis, {0: MagicMock()}, 0.0, 10.0, "#f77f00")})
-        # act — x_ratio=0.5 with to_index=11: raw=round(0 + 0.5*11)=round(5.5)=6 (banker's rounding)
+        # act — x_ratio maps to the middle x-value of the visible window
         result = chart.sample_at(0.5)
         # assert — nearest sample to the midpoint
         _, _, values = result[0]
-        self.assertEqual(values, [6.0])
+        self.assertEqual(values, [5.0])
 
     def test_sample_at_clamps_to_zoom_window(self):
         # arrange
@@ -339,7 +374,97 @@ class TestChart(TestCase):
         # act
         index = chart.sample_index_at_ratio(0.5)
         # assert
-        self.assertEqual(index, 6)
+        self.assertEqual(index, 5)
+
+    def test_sample_index_at_ratio_uses_nearest_x_on_non_uniform_abscissa(self):
+        # arrange
+        component = MagicMock()
+        # non-uniform transient-like spacing with dense early samples
+        abscissa = Expression("Time", np.array([0.0, 1e-9, 2e-9, 3e-9, 4e-9, 1e-3, 2e-3, 3e-3]), "s")
+        chart = Chart(component, "TRANSIENT", MagicMock(), abscissa, 0, 8, 1, 500)
+        # act — middle of visible x-range is 1.5 ms, equidistant from 1 ms and 2 ms; ties choose the left sample
+        index = chart.sample_index_at_ratio(0.5)
+        # assert
+        self.assertEqual(index, 5)
+
+    def test_sample_index_at_ratio_single_point_window_returns_from_index(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.array([0.0, 1.0, 2.0]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 1, 2, 1, 500)
+        # act
+        index = chart.sample_index_at_ratio(0.8)
+        # assert
+        self.assertEqual(index, 1)
+
+    def test_sample_index_at_ratio_descending_window_clamps_right_bound(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.array([3.0, 2.0, 1.0]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 3, 1, 500)
+        # act
+        index = chart.sample_index_at_ratio(1.0)
+        # assert
+        self.assertEqual(index, 2)
+
+    def test_sample_index_at_ratio_descending_window_uses_nearest_x(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.array([3.0, 2.0, 1.0]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 3, 1, 500)
+        # act
+        index = chart.sample_index_at_ratio(0.5)
+        # assert
+        self.assertEqual(index, 1)
+
+    def test_sample_index_at_ratio_ascending_clamps_right_bound_for_nan_target(self):
+        # arrange
+        component = MagicMock()
+        # crafted values produce a NaN target at x_ratio=1.0 via inf arithmetic
+        abscissa = Expression("Time", np.array([-np.inf, 0.0, np.inf]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 3, 1, 500)
+        # act
+        index = chart.sample_index_at_ratio(1.0)
+        # assert
+        self.assertEqual(index, 2)
+
+    def test_sample_index_at_ratio_descending_clamps_left_bound_for_nan_target(self):
+        # arrange
+        component = MagicMock()
+        # crafted values produce a NaN target at x_ratio=1.0 via inf arithmetic
+        abscissa = Expression("Time", np.array([np.inf, 0.0, -np.inf]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 3, 1, 500)
+        # act
+        index = chart.sample_index_at_ratio(1.0)
+        # assert
+        self.assertEqual(index, 0)
+
+    def test_sample_at_returns_empty_for_empty_visible_window_even_with_series(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.array([0.0, 1.0, 2.0]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 1, 1, 1, 500)
+        vout = Expression("Vout", np.array([10.0, 20.0, 30.0]), "V")
+        mock_axis = MagicMock()
+        chart._series["Vout"] = (vout, {vout: (mock_axis, {0: MagicMock()}, 10.0, 30.0, "#f77f00")})
+        # act
+        result = chart.sample_at(0.5)
+        # assert
+        self.assertEqual(result, [])
+
+    def test_sample_at_falls_back_to_raw_when_cached_points_are_empty(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.array([0.0, 1.0, 2.0, 3.0]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 4, 1, 500)
+        vout = Expression("Vout", np.array([10.0, 20.0, 30.0, 40.0]), "V")
+        mock_axis = MagicMock()
+        chart._series["Vout"] = (vout, {vout: (mock_axis, {0: MagicMock()}, 10.0, 40.0, "#f77f00")})
+        chart._sample_cache[vout] = {0: (np.array([]), np.array([]))}
+        # act
+        result = chart.sample_at(0.5)
+        # assert
+        self.assertEqual(result, [("Vout", "V", [20.0])])
 
     def test_sample_at_multiple_series(self):
         # arrange
@@ -358,6 +483,109 @@ class TestChart(TestCase):
         names = {r[0] for r in result}
         self.assertIn("Vout", names)
         self.assertIn("Iout", names)
+
+    def test_plot_series_removes_unselected_steps_and_clears_cached_points(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.array([0.0, 1.0, 2.0, 3.0]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 4, 2, 500)
+        chart._selected_steps = set()
+        vout = Expression("Vout", np.array([1.0, 2.0, 3.0, 4.0, 11.0, 12.0, 13.0, 14.0]), "V")
+        rendered_series = {1: MagicMock()}
+        mock_axis = MagicMock()
+        chart._series["Vout"] = (vout, {vout: (mock_axis, rendered_series, 1.0, 14.0, "#f77f00")})
+        chart._sample_cache[vout] = {1: (np.array([0.0]), np.array([1.0]))}
+        # act
+        chart.plot_series({vout})
+        # assert
+        self.assertEqual(rendered_series, {})
+        self.assertEqual(chart._sample_cache[vout], {})
+
+    def test_plot_series_skips_step_when_decimated_values_are_non_finite(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.array([0.0, 1.0, 2.0, 3.0]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 4, 1, 500)
+        vout = Expression("Vout", np.array([1.0, 2.0, 3.0, 4.0]), "V")
+        # act
+        with patch("viewer.chart.decimate_xy", return_value=(np.array([0.0, 1.0]), np.array([np.nan, np.inf]))):
+            chart.plot_series({vout})
+        # assert
+        self.assertIn("Vout", chart._series)
+        _, ordinate_series = chart._series["Vout"]
+        _, rendered_series, _, _, _ = ordinate_series[vout]
+        self.assertEqual(rendered_series, {})
+        self.assertNotIn(vout, chart._sample_cache)
+
+    def test_release_y_axis_clears_right_primary_reference(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        axis = MagicMock()
+        axis.property.return_value = "V"
+        chart._right_y_axis_1 = axis
+        chart._y_axes = {"V": axis}
+        chart._y_axes_ref_counts = {axis: 1}
+        # act
+        removed = chart._release_y_axis(axis)
+        # assert
+        self.assertTrue(removed)
+        self.assertIsNone(chart._right_y_axis_1)
+
+    def test_release_y_axis_clears_left_secondary_reference(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        axis = MagicMock()
+        axis.property.return_value = "A"
+        chart._left_y_axis_2 = axis
+        chart._y_axes = {"A": axis}
+        chart._y_axes_ref_counts = {axis: 1}
+        # act
+        removed = chart._release_y_axis(axis)
+        # assert
+        self.assertTrue(removed)
+        self.assertIsNone(chart._left_y_axis_2)
+
+    def test_release_y_axis_clears_right_secondary_reference(self):
+        # arrange
+        component = MagicMock()
+        values = np.linspace(0.0, 1.0, 10)
+        abscissa = Expression("Time", values, "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
+        axis = MagicMock()
+        axis.property.return_value = "W"
+        chart._right_y_axis_2 = axis
+        chart._y_axes = {"W": axis}
+        chart._y_axes_ref_counts = {axis: 1}
+        # act
+        removed = chart._release_y_axis(axis)
+        # assert
+        self.assertTrue(removed)
+        self.assertIsNone(chart._right_y_axis_2)
+
+    def test_sample_at_prefers_rendered_decimated_points_over_raw_samples(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.linspace(0.0, 10.0, 11), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 11, 1, 500)
+        # raw data has a narrow spike at x=5 that may be absent from rendered decimated points
+        vout = Expression("Vout", np.array([0.0, 0.5, 1.0, 2.0, 3.2, 4.2, 3.1, 2.0, 1.0, 0.5, 0.0]), "V")
+        mock_axis = MagicMock()
+        chart._series["Vout"] = (vout, {vout: (mock_axis, {0: MagicMock()}, 0.0, 4.2, "#f77f00")})
+        # rendered decimated points shown on chart near the same x do not include the raw spike
+        chart._sample_cache[vout] = {0: (np.array([0.0, 5.0, 10.0]), np.array([0.0, 3.9, 0.0]))}
+        # act
+        result = chart.sample_at(0.5)
+        # assert
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], "Vout")
+        self.assertEqual(result[0][1], "V")
+        self.assertEqual(result[0][2], [3.9])
 
     def test_abscissa_property(self):
         # arrange
@@ -777,12 +1005,12 @@ class TestChart(TestCase):
         # act
         with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
             chart.plot_series({vout})
-        # assert — series stored without raising; padded bounds surround the constant value
+        # assert — series stored without raising and min/max reflect the rendered values
         self.assertIn("Vout", chart._series)
         _, ordinate_series = chart._series["Vout"]
         _, _, stored_min, stored_max, _ = ordinate_series[vout]
-        self.assertLess(stored_min, 3.0)
-        self.assertGreater(stored_max, 3.0)
+        self.assertEqual(stored_min, 3.0)
+        self.assertEqual(stored_max, 3.0)
 
     def test_plot_series_handles_all_zero_signal(self):
         # arrange — all ordinate values are zero: scale == 0 triggers the else branch (y_range = 1.0)
@@ -795,12 +1023,12 @@ class TestChart(TestCase):
         # act
         with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
             chart.plot_series({vout})
-        # assert — series stored; padded bounds extend below and above zero
+        # assert — series stored and min/max reflect the rendered values
         self.assertIn("Vout", chart._series)
         _, ordinate_series = chart._series["Vout"]
         _, _, stored_min, stored_max, _ = ordinate_series[vout]
-        self.assertLess(stored_min, 0.0)
-        self.assertGreater(stored_max, 0.0)
+        self.assertEqual(stored_min, 0.0)
+        self.assertEqual(stored_max, 0.0)
 
     def test_redraw_all_series_handles_constant_signal(self):
         # arrange — constant ordinate so the flat-signal y_range fix fires inside _redraw_all_series

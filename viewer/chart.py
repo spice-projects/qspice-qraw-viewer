@@ -48,6 +48,8 @@ class Chart:
         self._decimate_target = decimate_target
         # track active series
         self._series: dict[str, tuple[Expression, dict[Expression, tuple[QAbstractAxis, dict[int, QLineSeries], float, float, str]]]] = {}
+        # decimated sample cache used by status-bar probing: {ordinate_variant: {step: (x_np, y_np)}}
+        self._sample_cache: dict[Expression, dict[int, tuple[np.ndarray, np.ndarray]]] = {}
         # axis tracking for measurement types, e.g. {"V": <QAbstractAxis>, "I": <QAbstractAxis>}
         self._y_axes: dict[str, QAbstractAxis] = {}
         self._y_axes_ref_counts: dict[QAbstractAxis, int] = {}
@@ -115,6 +117,8 @@ class Chart:
                     # release axis if no longer in use
                     if self._release_y_axis(axis):
                         axes_to_remove.append(axis)
+                    # clear decimated sample cache for this plotted variant
+                    self._sample_cache.pop(ordinate_variant, None)
                     # append to list for later removal from chart
                     series_to_remove.append([ordinate_variant.name, list(rendered_series.values())])
                 # remove from tracked series so we don't try to update it later
@@ -138,6 +142,10 @@ class Chart:
                         series_to_remove.append([None, [rendered_series[step]]])
                         # remove from dictionary so we don't try to update it later
                         del rendered_series[step]
+                        # check decimated sample cache exists for this plotted variant
+                        if ordinate_variant in self._sample_cache:
+                            # remove cached points for this step
+                            self._sample_cache[ordinate_variant].pop(step, None)
                 # check we need to generate a color for this expression
                 if color is None:
                     # assign next color in palette
@@ -185,6 +193,8 @@ class Chart:
                         series.setDashPattern([3, step + 1])
                     # append to lists
                     rendered_series[step] = series
+                    # cache decimated points used by the rendered series for status probing
+                    self._sample_cache.setdefault(ordinate_variant, {})[step] = (x_np, y_np)
                     # append to list for later addition to chart
                     ordinate_series_to_render.append(series)
                     # update min and max values
@@ -192,16 +202,8 @@ class Chart:
                     max_value = max(max_value, float(np.max(y_np)))
                 # render new series
                 series_to_render.append([ordinate_variant.name if ordinate_variant not in ordinate_series else None, color, ordinate_series_to_render])
-                # calculate scale for Y axis
-                scale = max(abs(max_value), abs(min_value))
-                # Y axis range
-                y_range = max_value - min_value
-                if y_range <= scale * 1e-9:
-                    y_range = abs(max_value) * 0.01 if scale != 0 else 1.0
-                # protect against very small ranges
-                delta = max(0.01 * y_range, 1e-3)
                 # store series with min and max values for later use when auto-ranging axes
-                ordinate_series[ordinate_variant] = (y_axis, rendered_series, min_value - delta if min_value != float("inf") else min_value, max_value + delta if max_value != float("-inf") else max_value, color)
+                ordinate_series[ordinate_variant] = (y_axis, rendered_series, min_value, max_value, color)
             # store reference to allow removal later
             self._series[ordinate.name] = (ordinate, ordinate_series)
         # check changes are required in qml
@@ -227,8 +229,12 @@ class Chart:
                 self._axis_ranges[y_axis] = (min(current_min, min_value), max(current_max, max_value))
         # update axis ranges based on collected min and max values for each variable type
         for y_axis, (y_min, y_max) in self._axis_ranges.items():
+            # range
+            y_range = y_max - y_min
+            # delta
+            delta = 0.03 * y_range
             # set y axis range
-            y_axis.setRange(y_min, y_max)
+            y_axis.setRange(y_min - delta, y_max + delta)
 
     def update_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
         # vertical changes flag
@@ -295,6 +301,7 @@ class Chart:
         old_y_axes = self._y_axes
         # reset internal state
         self._series = {}
+        self._sample_cache = {}
         self._y_axes = {}
         self._y_axes_ref_counts = {}
         # reset color index for new series
@@ -315,6 +322,17 @@ class Chart:
         # check series are plotted
         if not self._series:
             return []
+        # clamped horizontal ratio in visible window
+        x_ratio = max(0.0, min(1.0, x_ratio))
+        # current horizontal zoom bounds
+        from_index, to_index = self.zoom_abscissa_bounds()
+        # visible abscissa window
+        window = self._abscissa.data[from_index:to_index]
+        # check visible window is empty
+        if window.size == 0:
+            return []
+        # target abscissa value under the cursor in the visible window
+        target_x = float(window[0] + x_ratio * (window[-1] - window[0]))
         # compute the nearest sample index within the current zoom window
         idx = self.sample_index_at_ratio(x_ratio)
         # collect one (name, unit, value) tuple per plotted variant (magnitude/phase counted separately)
@@ -327,7 +345,20 @@ class Chart:
                 values: list[float] = []
                 # step and series for this step
                 for step, _ in rendered_series.items():
-                    # value for step at index
+                    # check decimated points are available for this visible step
+                    sample_points = self._sample_cache.get(ordinate_variant, {}).get(step)
+                    if sample_points is not None:
+                        # decimated x and y arrays for the rendered step
+                        x_np, y_np = sample_points
+                        # check decimated arrays are not empty
+                        if x_np.size > 0 and y_np.size > 0:
+                            # nearest rendered sample index in x-space
+                            nearest_index = int(np.argmin(np.abs(x_np - target_x)))
+                            # append rendered y value at nearest x
+                            values.append(float(y_np[nearest_index]))
+                            # next rendered step
+                            continue
+                    # fallback to raw value at nearest original sample index
                     values.append(float(ordinate_variant.data[step * self._step_points + idx]))
                 # append to result (name, unit, value)
                 result.append((ordinate_variant.name, ordinate_variant.unit, values))
@@ -341,8 +372,60 @@ class Chart:
     def sample_index_at_ratio(self, x_ratio: float) -> int:
         # x zoom window indexes
         from_index, to_index = self.zoom_abscissa_bounds()
-        # compute the nearest sample index within the current zoom window
-        return max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
+        # clamp ratio to visible horizontal span
+        x_ratio = max(0.0, min(1.0, x_ratio))
+        # window length
+        window_len = to_index - from_index
+        # check visible window has a single point
+        if window_len <= 1:
+            # return only sample index in window
+            return from_index
+        # visible abscissa window which can be non-uniformly spaced
+        window = self._abscissa.data[from_index:to_index]
+        # target x value on the visible axis for the given cursor ratio
+        target = float(window[0] + x_ratio * (window[-1] - window[0]))
+        # check ascending abscissa ordering
+        if window[0] <= window[-1]:
+            # insertion index in visible window
+            insert_at = int(np.searchsorted(window, target, side="left"))
+            # check target is left of the first visible sample
+            if insert_at <= 0:
+                # clamp to left bound
+                return from_index
+            # check target is right of the last visible sample
+            if insert_at >= window_len:
+                # clamp to right bound
+                return to_index - 1
+            # nearest neighbors around insertion point
+            left_idx = insert_at - 1
+            right_idx = insert_at
+            # distance to left neighbor
+            left_dist = abs(float(window[left_idx]) - target)
+            # distance to right neighbor
+            right_dist = abs(float(window[right_idx]) - target)
+            # select the closest index and break ties to the left
+            return from_index + (left_idx if left_dist <= right_dist else right_idx)
+        # descending abscissa search on reversed view
+        reversed_window = window[::-1]
+        # insertion index in reversed visible window
+        insert_at = int(np.searchsorted(reversed_window, target, side="left"))
+        # check target is left of the first visible sample in descending order
+        if insert_at <= 0:
+            # clamp to right bound in original ordering
+            return to_index - 1
+        # check target is right of the last visible sample in descending order
+        if insert_at >= window_len:
+            # clamp to left bound in original ordering
+            return from_index
+        # map insertion point neighbors back to original ordering
+        right_idx = window_len - insert_at
+        left_idx = right_idx - 1
+        # distance to left neighbor
+        left_dist = abs(float(window[left_idx]) - target)
+        # distance to right neighbor
+        right_dist = abs(float(window[right_idx]) - target)
+        # select the closest index and break ties to the left
+        return from_index + (left_idx if left_dist <= right_dist else right_idx)
 
     def _get_expressions_to_plot(self, expression: Expression) -> list[Expression]:
         # check we can plot expression as is
@@ -392,6 +475,8 @@ class Chart:
                         y_np = y_np[finite_mask]
                         # update series with decimated data
                         series.replaceNp(x_np, y_np)
+                        # cache decimated points used by the rendered series for status probing
+                        self._sample_cache.setdefault(ordinate_variant, {})[step] = (x_np, y_np)
                         # update min and max values
                         min_value = min(min_value, float(np.min(y_np)))
                         max_value = max(max_value, float(np.max(y_np)))
