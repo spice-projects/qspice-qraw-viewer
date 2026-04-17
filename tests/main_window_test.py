@@ -1,6 +1,6 @@
 import sys
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -325,6 +325,7 @@ class TestMainWindowSlots(TestCase):
         win._steps = 1
         win._decimate_target = 500
         win._plot_suggestions = []
+        win._initial_selected_steps = None
         win._root = MagicMock()
         win._root.getChart.return_value = MagicMock()
         # act
@@ -443,3 +444,167 @@ class TestMainWindowSlots(TestCase):
         win._on_pointer_moved(0, 0.2)
         # assert
         status_bar.showMessage.assert_called_once_with("time = 5.00 s    V(out) = 1.00 V")
+
+
+class TestMultiStepFft(TestCase):
+
+    def _make_fft_win(self, steps: int, step_points: int):
+        # build a bare MainWindow bypassing __init__
+        win = MainWindow.__new__(MainWindow)
+        total = steps * step_points
+        win._abscissa = MagicMock(data=np.linspace(0.0, 1e-3, step_points), unit="s")
+        win._abscissa.name = "Time"
+        win._abscissa_from_index = 0
+        win._abscissa_to_index = step_points
+        win._steps = steps
+        win._qraw_path = MagicMock()
+        win._fft_windows = []
+        win._charts = []
+        win._abscissa_scale = MagicMock()
+        return win
+
+    def _make_dialog_mock(self, expr: Expression, step_points: int):
+        # build a FftDialog mock whose .exec() returns Accepted via a shared sentinel
+        _accepted = object()
+        dialog = MagicMock()
+        dialog.exec.return_value = _accepted
+        dialog.result_expressions = [expr]
+        dialog.result_from_index = 0
+        dialog.result_to_index = step_points
+        dialog.result_window = MagicMock(value="Rectangular")
+        dialog.result_zero_pad = MagicMock(value="None")
+        dialog.result_normalize = False
+        dialog.result_keep_dc = True
+        dialog.result_output = MagicMock()
+        # make the Dialog class itself (not instance) carry DialogCode
+        dialog_class = MagicMock()
+        dialog_class.return_value = dialog
+        dialog_class.DialogCode.Accepted = _accepted
+        return dialog_class
+
+    def test_fft_builds_expression_data_for_all_steps(self):
+        # arrange
+        steps = 3
+        step_points = 64
+        win = self._make_fft_win(steps, step_points)
+        # source expression: distinct value per step so we can verify which step was used
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {0, 1, 2}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        captured_qraw = []
+        def fake_qraw(**kw):
+            captured_qraw.append(kw)
+            return MagicMock()
+        def fake_main_window(qraw, source_qraw_path=None):
+            win2 = MagicMock()
+            win2._initial_selected_steps = None
+            return win2
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", fake_qraw), \
+             patch("viewer.main_window.MainWindow", fake_main_window), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager"):
+            freq = np.linspace(0, 500, 33)
+            mock_fft.return_value = (freq, np.ones((1, 33)))
+            win._on_menu_fft(0)
+        # assert — compute_fft_many called once per step
+        self.assertEqual(mock_fft.call_count, steps)
+
+    def test_fft_qraw_built_with_all_steps(self):
+        # arrange
+        steps = 3
+        step_points = 64
+        win = self._make_fft_win(steps, step_points)
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {1, 2}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        captured_steps = []
+        def fake_qraw(**kw):
+            captured_steps.append(kw.get("steps"))
+            return MagicMock()
+        def fake_main_window(qraw, source_qraw_path=None):
+            win2 = MagicMock()
+            win2._initial_selected_steps = None
+            return win2
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", fake_qraw), \
+             patch("viewer.main_window.MainWindow", fake_main_window), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager"):
+            freq = np.linspace(0, 500, 33)
+            mock_fft.return_value = (freq, np.ones((1, 33)))
+            win._on_menu_fft(0)
+        # assert — QRawFile receives steps=3 (all source steps, not just selected)
+        self.assertEqual(captured_steps[0], steps)
+
+    def test_fft_window_initial_selected_steps_matches_source_chart(self):
+        # arrange
+        steps = 5
+        step_points = 64
+        win = self._make_fft_win(steps, step_points)
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {1, 2}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        created_windows = []
+        def fake_main_window(qraw, source_qraw_path=None):
+            win2 = MagicMock()
+            win2._initial_selected_steps = None
+            created_windows.append(win2)
+            return win2
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
+             patch("viewer.main_window.MainWindow", fake_main_window), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager"):
+            freq = np.linspace(0, 500, 33)
+            mock_fft.return_value = (freq, np.ones((1, 33)))
+            win._on_menu_fft(0)
+        # assert — FFT window initial step selection matches source chart selected steps
+        self.assertEqual(created_windows[0]._initial_selected_steps, {1, 2})
+
+    def test_fft_expression_data_length_is_steps_times_freq_points(self):
+        # arrange
+        steps = 2
+        step_points = 64
+        freq_points = 33
+        win = self._make_fft_win(steps, step_points)
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {0, 1}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        captured_expressions = []
+        def fake_expr_mgr(expressions):
+            captured_expressions.extend(expressions)
+            return MagicMock()
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
+             patch("viewer.main_window.MainWindow", return_value=MagicMock(_initial_selected_steps=None)), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager", fake_expr_mgr):
+            freq = np.linspace(0, 500, freq_points)
+            mock_fft.return_value = (freq, np.ones((1, freq_points)))
+            win._on_menu_fft(0)
+        # assert — FFT expression data length = steps * freq_points; abscissa = freq_points only
+        fft_expr = [e for e in captured_expressions if e.name != "Frequency"][0]
+        abscissa_expr = [e for e in captured_expressions if e.name == "Frequency"][0]
+        self.assertEqual(len(fft_expr.data), steps * freq_points)
+        self.assertEqual(len(abscissa_expr.data), freq_points)
