@@ -14,6 +14,18 @@ logger = logging.getLogger(__name__)
 # default decimation algorithm used when adding series to charts
 _DECIMATION_ALGORITHM = DecimationAlgorithm.M4
 
+# series colors
+_SERIES_COLOR_PALETTE = [
+    "#f77f00",  # orange
+    "#00b4d8",  # cyan
+    "#80ff72",  # green
+    "#e040fb",  # purple
+    "#ffdd00",  # yellow
+    "#ff4365",  # red
+    "#00f5d4",  # teal
+    "#bbdefb"   # pale blue
+]
+
 
 class Chart:
 
@@ -26,16 +38,16 @@ class Chart:
         self._expression_manager = expression_manager
         # store variables
         self._abscissa = abscissa
-        self._expressions: list[Expression] = []
         # current zoom window (x: in abscissa index, y: in ordinate percentages)
         self._zoom_window = (abscissa_from_index, 0.0, abscissa_to_index, 1.0)
         # steps
         self._steps = steps
         self._step_points = len(abscissa.data)
+        self._selected_steps: set[int] = set(range(self._steps))
         # store decimation target for later use when adding series
         self._decimate_target = decimate_target
         # track active series
-        self._series: dict[str, tuple[Expression, list[tuple[Expression, QAbstractAxis, list[QLineSeries], float, float]]]] = {}
+        self._series: dict[str, tuple[Expression, dict[Expression, tuple[QAbstractAxis, dict[int, QLineSeries], float, float, str]]]] = {}
         # axis tracking for measurement types, e.g. {"V": <QAbstractAxis>, "I": <QAbstractAxis>}
         self._y_axes: dict[str, QAbstractAxis] = {}
         self._y_axes_ref_counts: dict[QAbstractAxis, int] = {}
@@ -46,15 +58,30 @@ class Chart:
         self._right_y_axis_1: QAbstractAxis | None = None
         self._left_y_axis_2: QAbstractAxis | None = None
         self._right_y_axis_2: QAbstractAxis | None = None
+        # next color index for new series
+        self._next_color_index = 0
 
     @property
     def expressions(self) -> list[Expression]:
-        # return copy of expressions list to prevent external mutation of the chart's internal state, which would cause inconsistencies between the plotted series and the expressions list
-        return self._expressions[:]
+        return [expression for expression, _ in self._series.values()]
 
     @property
     def abscissa(self) -> Expression:
         return self._abscissa
+
+    @property
+    def selected_steps(self) -> set[int]:
+        return self._selected_steps
+
+    @selected_steps.setter
+    def selected_steps(self, selected_steps: set[int]) -> None:
+        # check selection changed
+        if selected_steps == self._selected_steps:
+            return
+        # update selected steps
+        self._selected_steps = selected_steps
+        # force step processing, adding/removing series as needed based on the new step selection and the current expressions plotted in the chart
+        self.plot_series(self.expressions)
 
     def render(self, abscissa_label: str, abscissa_scale: str, initial_expressions: set[Expression]):
         # x0 and x1
@@ -71,8 +98,8 @@ class Chart:
         # apply zoom window to abscissa — shared across all ordinate steps, will be paired with y below
         abscissa_values = self._abscissa.data[self._zoom_window[0]:self._zoom_window[2]]
         # series to render and remove from the chart
-        series_to_render: list[tuple[str, list[QLineSeries]]] = []
-        series_to_remove: list[tuple[str, list[QLineSeries]]] = []
+        series_to_render: list[tuple[str, str, list[QLineSeries]]] = []
+        series_to_remove: list[tuple[str | None, list[QLineSeries]]] = []
         # labels to remove from the chart
         labels_to_remove: list[str] = []
         # axis to remove, prevent GC until Qt finishes its async processing of the series removals that triggered these axis removals
@@ -83,15 +110,13 @@ class Chart:
             if expression not in expressions:
                 # log information
                 logger.debug("Removing series for expression '%s' from chart", expression.name)
-                # remove from expressions
-                self._expressions.remove(expression)
                 # enqueue series for removal
-                for ordinate_variant, axis, series_list, _, _ in ordinate_series:
+                for ordinate_variant, (axis, rendered_series, _, _, _) in ordinate_series.items():
                     # release axis if no longer in use
                     if self._release_y_axis(axis):
                         axes_to_remove.append(axis)
                     # append to list for later removal from chart
-                    series_to_remove.append([ordinate_variant.name, series_list])
+                    series_to_remove.append([ordinate_variant.name, list(rendered_series.values())])
                 # remove from tracked series so we don't try to update it later
                 labels_to_remove.append(label)
         # update dictionary outside loop
@@ -99,29 +124,42 @@ class Chart:
             del self._series[label]
         # loop expressions that should be plotted
         for ordinate in expressions:
-            # skip if a series with this label is already plotted
-            if ordinate.name in self._series:
-                continue
-            # store expression
-            self._expressions.append(ordinate)
-            # ordinate series
-            ordinate_series: list[tuple[Expression, QAbstractAxis, list[QLineSeries], float, float]] = []
-            # check ordinate represents a complex number, if this is the case split measurement into magnitude and phase
+            # lookup ordinate in series
+            _, ordinate_series = self._series.get(ordinate.name, (ordinate, {}))
+            # lookup expressions to plot for this ordinate, e.g. magnitude and phase for complex expressions when in AC chart
             for ordinate_variant in self._get_expressions_to_plot(ordinate):
-                # find y axis for measurement type
-                y_axis = self._get_y_axis(ordinate_variant.unit)
+                # looup ordinate variant in series
+                y_axis, rendered_series, min_value, max_value, color = ordinate_series.get(ordinate_variant, (None, {}, float("inf"), float("-inf"), None))
+                # loop rendered steps
+                for step in list(rendered_series.keys()):
+                    # check step should be removed
+                    if step not in self._selected_steps:
+                        # append to list for later removal from chart
+                        series_to_remove.append([None, [rendered_series[step]]])
+                        # remove from dictionary so we don't try to update it later
+                        del rendered_series[step]
+                # check we need to generate a color for this expression
+                if color is None:
+                    # assign next color in palette
+                    color = _SERIES_COLOR_PALETTE[self._next_color_index % len(_SERIES_COLOR_PALETTE)]
+                    # update index
+                    self._next_color_index += 1
+                # process axis as needed
                 if y_axis is None:
-                    # log information
-                    logger.warning(f"Cannot add series '{ordinate_variant.name}' of measurement type {ordinate_variant.unit} to chart — maximum number of Y axes reached")
-                    # exit loop
-                    break
-                # ordinate series
-                ordinate_variant_series: list[QLineSeries] = []
-                # min and max values for this variable variant (across all steps)
-                min_value = float("inf")
-                max_value = float("-inf")
+                    # find y axis for measurement type
+                    y_axis = self._get_y_axis(ordinate_variant.unit)
+                    if y_axis is None:
+                        # log information
+                        logger.warning(f"Cannot add series '{ordinate_variant.name}' of measurement type {ordinate_variant.unit} to chart — maximum number of Y axes reached")
+                        # exit loop
+                        break
+                # ordinate series to render
+                ordinate_series_to_render: list[QLineSeries] = []
                 # loop steps
-                for step in range(self._steps):
+                for step in self._selected_steps:
+                    # check step is already rendered
+                    if step in rendered_series:
+                        continue
                     # ordinate variant values for this step (as contiguous array in memory), apply zoom window
                     ordinate_values = ordinate_variant.data[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
                     # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
@@ -136,16 +174,24 @@ class Chart:
                         continue
                     # create series and hand buffers directly to Qt — no Python loop
                     series = QLineSeries()
+                    series.setColor(color)
                     series.setWidth(2)
                     series.replaceNp(x_np, y_np)
                     series.setAxisY(y_axis)
+                    # stroke style for stepped variants
+                    if step > 0:
+                        # change stroke style
+                        series.setStrokeStyle(QLineSeries.StrokeStyle.DashLine)
+                        series.setDashPattern([3, step + 1])
                     # append to lists
-                    ordinate_variant_series.append(series)
+                    rendered_series[step] = series
+                    # append to list for later addition to chart
+                    ordinate_series_to_render.append(series)
                     # update min and max values
                     min_value = min(min_value, float(np.min(y_np)))
                     max_value = max(max_value, float(np.max(y_np)))
-                # append to lists
-                series_to_render.append([ordinate_variant.name, ordinate_variant_series])
+                # render new series
+                series_to_render.append([ordinate_variant.name if ordinate_variant not in ordinate_series else None, color, ordinate_series_to_render])
                 # calculate scale for Y axis
                 scale = max(abs(max_value), abs(min_value))
                 # Y axis range
@@ -155,13 +201,15 @@ class Chart:
                 # protect against very small ranges
                 delta = max(0.01 * y_range, 1e-3)
                 # store series with min and max values for later use when auto-ranging axes
-                ordinate_series.append((ordinate_variant, y_axis, ordinate_variant_series, min_value - delta, max_value + delta))
+                ordinate_series[ordinate_variant] = (y_axis, rendered_series, min_value - delta if min_value != float("inf") else min_value, max_value + delta if max_value != float("-inf") else max_value, color)
             # store reference to allow removal later
             self._series[ordinate.name] = (ordinate, ordinate_series)
-        # add/remove series from chart
-        self._component.updateGraphsView(series_to_render, series_to_remove)
-        # release stash after Qt finishes its async processing
-        QTimer.singleShot(2000, lambda: (series_to_remove.clear(), axes_to_remove.clear()))
+        # check changes are required in qml
+        if len(series_to_render) > 0 or len(series_to_remove) > 0:
+            # add/remove series from chart
+            self._component.updateGraphsView(series_to_render, series_to_remove)
+            # release stash after Qt finishes its async processing
+            QTimer.singleShot(2000, lambda: (series_to_remove.clear(), axes_to_remove.clear()))
 
     def auto_range(self):
         # skip if no series are currently plotted
@@ -172,7 +220,7 @@ class Chart:
         # loop visible series
         for _, (_, ordinate_series) in self._series.items():
             # process series
-            for _, y_axis, _, min_value, max_value in ordinate_series:
+            for y_axis, _, min_value, max_value, _ in ordinate_series.values():
                 # current min and max for this variable type
                 current_min, current_max = self._axis_ranges.get(y_axis, (float("inf"), float("-inf")))
                 # compute Y values for this variable index
@@ -245,12 +293,12 @@ class Chart:
         # Qt enqueues the visual removal of series asynchronously. Python owns the QLineSeries, so we must NOT let Python GC them until Qt has finished processing the removal queue.
         old_series = self._series
         old_y_axes = self._y_axes
-        old_expressions = self._expressions
         # reset internal state
         self._series = {}
         self._y_axes = {}
         self._y_axes_ref_counts = {}
-        self._expressions = []
+        # reset color index for new series
+        self._next_color_index = 0
         # reset zoom window (vertical axes only, keep horizontal range)
         self._zoom_window = (self._zoom_window[0], 0.0, self._zoom_window[2], 1.0)
         # enqueue Qt-side removal
@@ -261,7 +309,7 @@ class Chart:
         self._left_y_axis_2 = None
         self._right_y_axis_2 = None
         # release stash after Qt finishes its async processing
-        QTimer.singleShot(1000, lambda: (old_series.clear(), old_y_axes.clear(), old_expressions.clear()))
+        QTimer.singleShot(1000, lambda: (old_series.clear(), old_y_axes.clear()))
 
     def sample_at(self, x_ratio: float) -> list[tuple[str, str, list[float]]]:
         # check series are plotted
@@ -276,11 +324,11 @@ class Chart:
         # loop series
         for _, (_, ordinate_series) in self._series.items():
             # loop variants for this series (magnitude/phase)
-            for ordinate_variant, _, series_list, _, _ in ordinate_series:
+            for ordinate_variant, (_, rendered_series, _, _, _) in ordinate_series.items():
                 # values (per step)
                 values: list[float] = []
-                # loop series list (steps)
-                for step, _ in enumerate(series_list):
+                # step and series for this step
+                for step, _ in rendered_series.items():
                     # value for step at index
                     values.append(float(ordinate_variant.data[step * self._step_points + idx]))
                 # append to result (name, unit, value)
@@ -314,15 +362,13 @@ class Chart:
         try:
             # loop existing series
             for _, (_, ordinate_series) in self._series.items():
-                # recalculated min and max values for this variable across all steps based on the new zoom window
-                new_ordinate_series = []
                 # loop series data (actual data visible in chart)
-                for ordinate_variant, y_axis, series_list, _, _ in ordinate_series:
+                for ordinate_variant, (y_axis, rendered_series, _, _, color) in ordinate_series.items():
                     # min and max value recalculation for the new zoom window
                     min_value = float("inf")
                     max_value = float("-inf")
                     # loop steps
-                    for step in range(self._steps):
+                    for step, series in rendered_series.items():
                         # ordinate variant values for this step
                         ordinate_values = ordinate_variant.data[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
                         # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
@@ -333,7 +379,7 @@ class Chart:
                         x_np = x_np[finite_mask]
                         y_np = y_np[finite_mask]
                         # update series with decimated data
-                        series_list[step].replaceNp(x_np, y_np)
+                        series.replaceNp(x_np, y_np)
                         # update min and max values
                         min_value = min(min_value, float(np.min(y_np)))
                         max_value = max(max_value, float(np.max(y_np)))
@@ -345,10 +391,8 @@ class Chart:
                         y_range = abs(max_value) * 0.01 if scale != 0 else 1.0
                     # protect against very small ranges
                     delta = max(0.01 * y_range, 1e-3)
-                    # append to list for later update of the series data and axis ranges after the loop
-                    new_ordinate_series.append((ordinate_variant, y_axis, series_list, min_value - delta, max_value + delta))
-                # replace the list contents in-place
-                ordinate_series[:] = new_ordinate_series
+                    # update dictionary entry
+                    ordinate_series[ordinate_variant] = (y_axis, rendered_series, min_value - delta, max_value + delta, color)
         finally:
             # resize abscissa axis
             self._component.resizeAbscissa(abscissa_min, abscissa_max)

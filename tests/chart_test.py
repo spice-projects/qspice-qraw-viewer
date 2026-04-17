@@ -69,7 +69,7 @@ class TestChart(TestCase):
         mock_y_axis = MagicMock()
         vout = Expression("Vout", np.array([1.0, 2.0]), "V")
         # manually inject a series entry with known min/max so auto_range is predictable
-        chart._series = {"Vout": (vout, [(vout, mock_y_axis, [], -1.0, 5.0)])}
+        chart._series = {"Vout": (vout, {vout: (mock_y_axis, {}, -1.0, 5.0, "#f77f00")})}
         # act
         chart.auto_range()
         # assert — setRange must be called with the full min/max since zoom is at default (0.0, 1.0)
@@ -84,7 +84,7 @@ class TestChart(TestCase):
         mock_y_axis = MagicMock()
         vout = Expression("Vout", np.array([1.0, 2.0]), "V")
         # inject a series with min=-1.0 and max=5.0 (range of 6.0)
-        chart._series = {"Vout": (vout, [(vout, mock_y_axis, [], -1.0, 5.0)])}
+        chart._series = {"Vout": (vout, {vout: (mock_y_axis, {}, -1.0, 5.0, "#f77f00")})}
         # apply a vertical zoom that selects only the top quarter (0.0 to 0.25)
         chart.update_zoom_window(-1, -1, 0.0, 0.25)
         # act
@@ -220,13 +220,12 @@ class TestChart(TestCase):
         chart = Chart(component, "AC", MagicMock(), abscissa, 0, 100, 1, 500)
         vout = Expression("Vout", np.array([1.0, 2.0]), "V")
         # inject state that clear() must wipe
-        chart._expressions.append(vout)
         chart._y_axes["V"] = MagicMock()
-        chart._series["Vout"] = (vout, [])
+        chart._series["Vout"] = (vout, {})
         # act
         chart.clear()
         # assert — all tracking collections are empty after clear
-        self.assertEqual(chart._expressions, [])
+        self.assertEqual(chart.expressions, [])
         self.assertEqual(chart._series, {})
         self.assertEqual(chart._y_axes, {})
 
@@ -266,7 +265,7 @@ class TestChart(TestCase):
         # ordinate: 11 linearly-spaced values from 0 to 100
         vout = Expression("Vout", np.linspace(0.0, 100.0, 11), "V")
         mock_y_axis = MagicMock()
-        chart._series["Vout"] = (vout, [(vout, mock_y_axis, [MagicMock()], 0.0, 100.0)])
+        chart._series["Vout"] = (vout, {vout: (mock_y_axis, {0: MagicMock()}, 0.0, 100.0, "#f77f00")})
         # act — sample at the right edge (x_ratio=1.0) should return the last value
         result = chart.sample_at(1.0)
         # assert
@@ -284,7 +283,7 @@ class TestChart(TestCase):
         # ordinate: index-valued array so we can easily verify which index was sampled
         vout = Expression("Vout", np.arange(11, dtype=float), "V")
         mock_y_axis = MagicMock()
-        chart._series["Vout"] = (vout, [(vout, mock_y_axis, [MagicMock()], 0.0, 10.0)])
+        chart._series["Vout"] = (vout, {vout: (mock_y_axis, {0: MagicMock()}, 0.0, 10.0, "#f77f00")})
         # act — x_ratio=0.5 with to_index=11: raw=round(0 + 0.5*11)=round(5.5)=6 (banker's rounding)
         result = chart.sample_at(0.5)
         # assert — nearest sample to the midpoint
@@ -298,7 +297,7 @@ class TestChart(TestCase):
         chart = Chart(component, "AC", MagicMock(), abscissa, 2, 8, 1, 500)
         vout = Expression("Vout", np.arange(11, dtype=float), "V")
         mock_y_axis = MagicMock()
-        chart._series["Vout"] = (vout, [(vout, mock_y_axis, [MagicMock()], 0.0, 10.0)])
+        chart._series["Vout"] = (vout, {vout: (mock_y_axis, {0: MagicMock()}, 0.0, 10.0, "#f77f00")})
         # act — x_ratio=0.0 must map to from_index=2, not index 0
         result_left = chart.sample_at(0.0)
         # x_ratio=1.0 must map to to_index-1=7
@@ -317,8 +316,8 @@ class TestChart(TestCase):
         vout = Expression("Vout", np.array([10.0, 20.0, 30.0, 40.0, 50.0]), "V")
         iout = Expression("Iout", np.array([1.0, 2.0, 3.0, 4.0, 5.0]), "A")
         mock_axis = MagicMock()
-        chart._series["Vout"] = (vout, [(vout, mock_axis, [], 10.0, 50.0)])
-        chart._series["Iout"] = (iout, [(iout, mock_axis, [], 1.0, 5.0)])
+        chart._series["Vout"] = (vout, {vout: (mock_axis, {0: MagicMock()}, 10.0, 50.0, "#f77f00")})
+        chart._series["Iout"] = (iout, {iout: (mock_axis, {0: MagicMock()}, 1.0, 5.0, "#00b4d8")})
         # act — x_ratio=0.0 → index 0
         result = chart.sample_at(0.0)
         # assert — two entries returned, one per series
@@ -414,8 +413,7 @@ class TestChart(TestCase):
         chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
         vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
         # inject existing series entry so chart believes Vout is already plotted
-        chart._series["Vout"] = (vout, [])
-        chart._expressions.append(vout)
+        chart._series["Vout"] = (vout, {vout: (MagicMock(), {0: MagicMock()}, 0.0, 5.0, "#f77f00")})
         # act
         chart.plot_series({vout})
         # assert — no new axis was requested because no new series were created
@@ -434,8 +432,7 @@ class TestChart(TestCase):
         chart._y_axes_ref_counts[y_axis] = 1
         chart._left_y_axis_1 = y_axis
         # inject an existing series that is absent from the new expression set
-        chart._series["Vout"] = (vout, [(vout, y_axis, [MagicMock()], 0.0, 5.0)])
-        chart._expressions.append(vout)
+        chart._series["Vout"] = (vout, {vout: (y_axis, {0: MagicMock()}, 0.0, 5.0, "#f77f00")})
         # act — empty set means all existing series should be removed
         chart.plot_series(set())
         # assert
@@ -459,8 +456,8 @@ class TestChart(TestCase):
             chart.plot_series({vout})
         # assert — one QLineSeries created per step
         _, ordinate_series = chart._series["Vout"]
-        _, _, series_list, _, _ = ordinate_series[0]
-        self.assertEqual(len(series_list), 2)
+        _, rendered_series, _, _, _ = ordinate_series[vout]
+        self.assertEqual(len(rendered_series), 2)
 
     def test_get_expressions_to_plot_real_returns_single_entry(self):
         # arrange
@@ -623,7 +620,7 @@ class TestChart(TestCase):
         chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
         vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
         mock_series = MagicMock()
-        chart._series["Vout"] = (vout, [(vout, MagicMock(), [mock_series], 0.0, 5.0)])
+        chart._series["Vout"] = (vout, {vout: (MagicMock(), {0: mock_series}, 0.0, 5.0, "#f77f00")})
         decimated_y = np.linspace(0.0, 5.0, 10)
         # act
         with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
@@ -639,7 +636,7 @@ class TestChart(TestCase):
         chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
         vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
         mock_series = MagicMock()
-        chart._series["Vout"] = (vout, [(vout, MagicMock(), [mock_series], 0.0, 5.0)])
+        chart._series["Vout"] = (vout, {vout: (MagicMock(), {0: mock_series}, 0.0, 5.0, "#f77f00")})
         x_out = np.linspace(0.0, 10.0, 10)
         y_out = np.linspace(0.0, 5.0, 10)
         # act
@@ -728,7 +725,7 @@ class TestChart(TestCase):
         # assert — series stored without raising; padded bounds surround the constant value
         self.assertIn("Vout", chart._series)
         _, ordinate_series = chart._series["Vout"]
-        _, _, _, stored_min, stored_max = ordinate_series[0]
+        _, _, stored_min, stored_max, _ = ordinate_series[vout]
         self.assertLess(stored_min, 3.0)
         self.assertGreater(stored_max, 3.0)
 
@@ -746,7 +743,7 @@ class TestChart(TestCase):
         # assert — series stored; padded bounds extend below and above zero
         self.assertIn("Vout", chart._series)
         _, ordinate_series = chart._series["Vout"]
-        _, _, _, stored_min, stored_max = ordinate_series[0]
+        _, _, stored_min, stored_max, _ = ordinate_series[vout]
         self.assertLess(stored_min, 0.0)
         self.assertGreater(stored_max, 0.0)
 
@@ -758,7 +755,7 @@ class TestChart(TestCase):
         chart = Chart(component, "AC", MagicMock(), abscissa, 0, 10, 1, 500)
         vout = Expression("Vout", np.full(10, 7.0), "V")
         mock_series = MagicMock()
-        chart._series["Vout"] = (vout, [(vout, MagicMock(), [mock_series], 7.0, 7.0)])
+        chart._series["Vout"] = (vout, {vout: (MagicMock(), {0: mock_series}, 7.0, 7.0, "#f77f00")})
         decimated_y = np.full(10, 7.0)
         # act
         with patch("viewer.chart.decimate_xy", return_value=(values, decimated_y)):
@@ -786,4 +783,4 @@ class TestChart(TestCase):
             chart.plot_series({fifth})
         # assert — expression tracked in _series but its ordinate_series list is empty
         _, ordinate_series = chart._series["E5"]
-        self.assertEqual(ordinate_series, [])
+        self.assertEqual(ordinate_series, {})

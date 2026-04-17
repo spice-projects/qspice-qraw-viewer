@@ -65,6 +65,9 @@ QML signals are declared with explicit types (`signal zoom(int idx, real ratio)`
 
 - Framework: `unittest.TestCase` only — no pytest, no setUp/tearDown, no class fixtures
 - Every test is fully self-contained; all test data defined inside the test method
+- Do not add module-level helper functions, module-level fixture constants, or class helper methods for test setup in new tests
+- Keep behavior setup inside each `test_*` method (`# arrange` section) even if it repeats across methods
+- Preserve the policy checker in `tests/testing_conventions_test.py`; update tests to satisfy it rather than weakening it
 - Required comment markers: `# arrange`, `# act`, `# assert` — no blank lines between sections
 - Qt mocking: mock `PySide6` submodules via `sys.modules` before importing viewer modules; `Slot` must be a pass-through decorator; `QMainWindow` must be a real inheritable class
 - Bypass `__init__` for heavy Qt classes: `win = MainWindow.__new__(MainWindow)`, then set only the attributes the method under test needs
