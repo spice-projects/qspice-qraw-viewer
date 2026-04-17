@@ -308,6 +308,39 @@ class TestChart(TestCase):
         self.assertEqual(left_val, [2.0])
         self.assertEqual(right_val, [7.0])
 
+    def test_zoom_abscissa_bounds_returns_current_horizontal_window(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.linspace(0.0, 10.0, 11), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 2, 8, 1, 500)
+        # act
+        from_index, to_index = chart.zoom_abscissa_bounds()
+        # assert
+        self.assertEqual(from_index, 2)
+        self.assertEqual(to_index, 8)
+
+    def test_sample_index_at_ratio_clamps_to_zoom_bounds(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.linspace(0.0, 10.0, 11), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 2, 8, 1, 500)
+        # act
+        left_index = chart.sample_index_at_ratio(-0.5)
+        right_index = chart.sample_index_at_ratio(2.0)
+        # assert
+        self.assertEqual(left_index, 2)
+        self.assertEqual(right_index, 7)
+
+    def test_sample_index_at_ratio_uses_nearest_sample_in_window(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.linspace(0.0, 10.0, 11), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, 0, 11, 1, 500)
+        # act
+        index = chart.sample_index_at_ratio(0.5)
+        # assert
+        self.assertEqual(index, 6)
+
     def test_sample_at_multiple_series(self):
         # arrange
         component = MagicMock()

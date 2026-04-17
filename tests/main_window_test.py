@@ -11,6 +11,7 @@ sys.modules.setdefault("PySide6.QtGui", MagicMock())
 sys.modules.setdefault("PySide6.QtGraphs", MagicMock())
 sys.modules.setdefault("PySide6.QtQml", MagicMock())
 sys.modules.setdefault("PySide6.QtQuick", MagicMock())
+sys.modules.setdefault("PySide6.QtWebEngineWidgets", MagicMock())
 sys.modules.setdefault("PySide6.QtWidgets", MagicMock())
 # Slot must act as a pass-through decorator so @Slot(...) does not replace the method with a mock
 sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
@@ -393,3 +394,52 @@ class TestMainWindowSlots(TestCase):
         # assert — QSize is mocked so just verify the call was made with the right args
         # actual assertion: method exists and returns something (integration check is enough here)
         self.assertIsNotNone(result)
+
+    def test_pointer_moved_uses_chart_public_sampling_api(self):
+        # arrange
+        win = self._make_win(total=20)
+        win._abscissa = MagicMock(unit="s", data=list(range(20)), values=list(range(20)))
+        win._abscissa.name = "time"
+        win._abscissa_scale = "linear"
+        win._last_status_time = 0.0
+        win.statusBar = MagicMock(return_value=MagicMock())
+        chart = MagicMock()
+        chart.sample_index_at_ratio.return_value = 7
+        chart.sample_at.return_value = [("V(out)", "V", [1.23])]
+        win._charts = [chart]
+        # act
+        win._on_pointer_moved(0, 0.35)
+        # assert
+        chart.sample_index_at_ratio.assert_called_once_with(0.35)
+        chart.sample_at.assert_called_once_with(0.35)
+
+    def test_pointer_moved_ignores_invalid_chart_index(self):
+        # arrange
+        win = self._make_win(total=20)
+        win._last_status_time = 0.0
+        win.statusBar = MagicMock(return_value=MagicMock())
+        chart = MagicMock()
+        win._charts = [chart]
+        # act
+        win._on_pointer_moved(99, 0.5)
+        # assert
+        chart.sample_index_at_ratio.assert_not_called()
+        chart.sample_at.assert_not_called()
+
+    def test_pointer_moved_updates_status_bar_message(self):
+        # arrange
+        win = self._make_win(total=20)
+        win._abscissa = MagicMock(unit="s", data=list(range(20)), values=list(range(20)))
+        win._abscissa.name = "time"
+        win._abscissa_scale = "linear"
+        win._last_status_time = 0.0
+        status_bar = MagicMock()
+        win.statusBar = MagicMock(return_value=status_bar)
+        chart = MagicMock()
+        chart.sample_index_at_ratio.return_value = 5
+        chart.sample_at.return_value = [("V(out)", "V", [1.0])]
+        win._charts = [chart]
+        # act
+        win._on_pointer_moved(0, 0.2)
+        # assert
+        status_bar.showMessage.assert_called_once_with("time = 5.00 s    V(out) = 1.00 V")

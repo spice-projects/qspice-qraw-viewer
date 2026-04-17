@@ -315,10 +315,8 @@ class Chart:
         # check series are plotted
         if not self._series:
             return []
-        # x zoom window indexes
-        from_index, _, to_index, _ = self._zoom_window
         # compute the nearest sample index within the current zoom window
-        idx = max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
+        idx = self.sample_index_at_ratio(x_ratio)
         # collect one (name, unit, value) tuple per plotted variant (magnitude/phase counted separately)
         result: list[tuple[str, str, list[float]]] = []
         # loop series
@@ -335,6 +333,16 @@ class Chart:
                 result.append((ordinate_variant.name, ordinate_variant.unit, values))
         # exit
         return result
+
+    def zoom_abscissa_bounds(self) -> tuple[int, int]:
+        # current abscissa bounds in sample indexes
+        return self._zoom_window[0], self._zoom_window[2]
+
+    def sample_index_at_ratio(self, x_ratio: float) -> int:
+        # x zoom window indexes
+        from_index, to_index = self.zoom_abscissa_bounds()
+        # compute the nearest sample index within the current zoom window
+        return max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
 
     def _get_expressions_to_plot(self, expression: Expression) -> list[Expression]:
         # check we can plot expression as is

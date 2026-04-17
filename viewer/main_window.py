@@ -543,9 +543,7 @@ class MainWindow(QMainWindow):
         # chart at index
         chart = self._charts[chart_index]
         # compute abscissa index within the current zoom window
-        from_index, _, to_index, _ = chart._zoom_window
-        # index within the zoom window based on the supplied x_ratio
-        idx = max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
+        idx = chart.sample_index_at_ratio(x_ratio)
         # retrieve the stored abscissa value (may be in log space for decade/octave scales)
         x_stored = float(self._abscissa.data[idx])
         # convert stored value back to physical abscissa value
