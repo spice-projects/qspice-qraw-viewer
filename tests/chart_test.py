@@ -555,6 +555,28 @@ class TestChart(TestCase):
         # assert
         self.assertEqual(result, [])
 
+    def test_get_expressions_to_plot_complex_on_tran_chart_returns_empty(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.linspace(0.0, 1e-3, 10), "s")
+        chart = Chart(component, "TRAN", MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.ones(10, dtype=np.complex128), "V")
+        # act
+        result = chart._get_expressions_to_plot(vout)
+        # assert — complex expressions are not plottable in TRAN charts; safe empty list returned
+        self.assertEqual(result, [])
+
+    def test_get_expressions_to_plot_complex_on_dc_chart_returns_empty(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("V1", np.linspace(0.0, 5.0, 10), "V")
+        chart = Chart(component, "DC", MagicMock(), abscissa, 0, 10, 1, 500)
+        vout = Expression("Vout", np.ones(10, dtype=np.complex128), "V")
+        # act
+        result = chart._get_expressions_to_plot(vout)
+        # assert — complex expressions are not plottable in DC charts; safe empty list returned
+        self.assertEqual(result, [])
+
     def test_clear_resets_axis_slot_references(self):
         # arrange
         component = MagicMock()

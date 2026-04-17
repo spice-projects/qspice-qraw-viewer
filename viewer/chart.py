@@ -360,6 +360,10 @@ class Chart:
                 return []
             # exit
             return [magnitude_expression, phase_expression]
+        # complex expressions are only renderable in AC charts; skip with a warning for other chart types
+        logger.warning("skipping complex expression '%s': not supported for chart type '%s'", expression.name, self._chart_type)
+        # exit
+        return []
 
     def _redraw_all_series(self):
         # abscissa values — shared across all ordinate steps, will be paired with y below
