@@ -19,7 +19,7 @@ sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
 sys.modules["PySide6.QtWidgets"].QMainWindow = type("QMainWindow", (), {})
 
 from viewer.expression import Expression  # noqa: E402
-from viewer.main_window import MainWindow, _build_step_combinations, _format_value, _format_values  # noqa: E402
+from viewer.main_window import MainWindow, _build_step_combinations, _compute_decimate_target, _FALLBACK_DECIMATE_TARGET, _format_value, _format_values  # noqa: E402
 
 
 class TestMainWindow(TestCase):
@@ -608,3 +608,44 @@ class TestMultiStepFft(TestCase):
         abscissa_expr = [e for e in captured_expressions if e.name == "Frequency"][0]
         self.assertEqual(len(fft_expr.data), steps * freq_points)
         self.assertEqual(len(abscissa_expr.data), freq_points)
+
+
+class TestComputeDecimateTarget(TestCase):
+
+    def test_returns_fallback_when_screen_is_none(self):
+        # arrange
+        screen = None
+        # act
+        result = _compute_decimate_target(screen)
+        # assert
+        self.assertEqual(result, _FALLBACK_DECIMATE_TARGET)
+
+    def test_uses_screen_width_and_pixel_ratio(self):
+        # arrange
+        screen = MagicMock()
+        screen.size.return_value.width.return_value = 2560
+        screen.devicePixelRatio.return_value = 2.0
+        # act
+        result = _compute_decimate_target(screen)
+        # assert
+        self.assertEqual(result, 2560 * 5)
+
+    def test_pixel_ratio_below_five_is_clamped_to_five(self):
+        # arrange
+        screen = MagicMock()
+        screen.size.return_value.width.return_value = 1920
+        screen.devicePixelRatio.return_value = 1.0
+        # act
+        result = _compute_decimate_target(screen)
+        # assert
+        self.assertEqual(result, 1920 * 5)
+
+    def test_high_pixel_ratio_is_used_directly(self):
+        # arrange
+        screen = MagicMock()
+        screen.size.return_value.width.return_value = 3840
+        screen.devicePixelRatio.return_value = 8.0
+        # act
+        result = _compute_decimate_target(screen)
+        # assert
+        self.assertEqual(result, 3840 * 8)

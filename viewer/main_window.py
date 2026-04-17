@@ -137,6 +137,17 @@ def _build_step_combinations(expressions: list[Expression], steps: int, step_poi
     return parameter_names, combinations
 
 
+_FALLBACK_DECIMATE_TARGET = 9600
+
+
+def _compute_decimate_target(screen) -> int:
+    # return conservative fallback when no screen is available (headless / early startup)
+    if screen is None:
+        return _FALLBACK_DECIMATE_TARGET
+    # physical pixels: width × clamped device-pixel ratio
+    return screen.size().width() * max(5, int(screen.devicePixelRatio()))
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self, qraw_file: QRawFile, source_qraw_path: Path | None = None):
@@ -194,8 +205,7 @@ class MainWindow(QMainWindow):
         # create the native main menu structure
         self._create_main_menu()
         # decimation target — physical pixels of the primary screen width
-        screen = QGuiApplication.primaryScreen()
-        self._decimate_target = screen.size().width() * max(5, int(screen.devicePixelRatio()))
+        self._decimate_target = _compute_decimate_target(QGuiApplication.primaryScreen())
         # throttle timestamp for status bar updates
         self._last_status_time: float = 0.0
 
