@@ -404,7 +404,12 @@ def decimate_xy(x: np.ndarray, y: np.ndarray, target: int, algorithm: Decimation
         indices = _m4_indices(y, target)
     elif algorithm == DecimationAlgorithm.LTTB:
         # LTTB needs actual x coordinates for accurate triangle area calculation
-        indices = _lttb_indices(x.astype(np.float64), y, target)
+        # avoid dtype/contiguity conversion when x is already suitable
+        if x.dtype == np.float64 and x.flags.c_contiguous:
+            x_for_lttb = x
+        else:
+            x_for_lttb = np.ascontiguousarray(x, dtype=np.float64)
+        indices = _lttb_indices(x_for_lttb, y, target)
     else:
         raise ValueError(f"Unknown decimation algorithm: {algorithm}")
     # exit
