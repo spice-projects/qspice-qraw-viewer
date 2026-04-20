@@ -461,7 +461,6 @@ class TestMultiStepFft(TestCase):
     def _make_fft_win(self, steps: int, step_points: int):
         # build a bare MainWindow bypassing __init__
         win = MainWindow.__new__(MainWindow)
-        total = steps * step_points
         win._abscissa = MagicMock(data=np.linspace(0.0, 1e-3, step_points), unit="s")
         win._abscissa.name = "Time"
         win._abscissa_from_index = 0
@@ -507,13 +506,16 @@ class TestMultiStepFft(TestCase):
         win._charts = [chart]
         dialog_class = self._make_dialog_mock(expr, step_points)
         captured_qraw = []
+
         def fake_qraw(**kw):
             captured_qraw.append(kw)
             return MagicMock()
+
         def fake_main_window(qraw, source_qraw_path=None):
             win2 = MagicMock()
             win2._initial_selected_steps = None
             return win2
+
         with patch("viewer.main_window.FftDialog", dialog_class), \
              patch("viewer.main_window.QRawFile", fake_qraw), \
              patch("viewer.main_window.MainWindow", fake_main_window), \
@@ -539,13 +541,16 @@ class TestMultiStepFft(TestCase):
         win._charts = [chart]
         dialog_class = self._make_dialog_mock(expr, step_points)
         captured_steps = []
+
         def fake_qraw(**kw):
             captured_steps.append(kw.get("steps"))
             return MagicMock()
+
         def fake_main_window(qraw, source_qraw_path=None):
             win2 = MagicMock()
             win2._initial_selected_steps = None
             return win2
+
         with patch("viewer.main_window.FftDialog", dialog_class), \
              patch("viewer.main_window.QRawFile", fake_qraw), \
              patch("viewer.main_window.MainWindow", fake_main_window), \
@@ -571,11 +576,13 @@ class TestMultiStepFft(TestCase):
         win._charts = [chart]
         dialog_class = self._make_dialog_mock(expr, step_points)
         created_windows = []
+
         def fake_main_window(qraw, source_qraw_path=None):
             win2 = MagicMock()
             win2._initial_selected_steps = None
             created_windows.append(win2)
             return win2
+
         with patch("viewer.main_window.FftDialog", dialog_class), \
              patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
              patch("viewer.main_window.MainWindow", fake_main_window), \
@@ -601,11 +608,13 @@ class TestMultiStepFft(TestCase):
         win._charts = [chart]
         dialog_class = self._make_dialog_mock(expr, step_points)
         created_windows = []
+
         def fake_main_window(qraw, source_qraw_path=None):
             win2 = MagicMock()
             win2._initial_selected_steps = None
             created_windows.append(win2)
             return win2
+
         with patch("viewer.main_window.FftDialog", dialog_class), \
              patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
              patch("viewer.main_window.MainWindow", fake_main_window), \
@@ -633,9 +642,11 @@ class TestMultiStepFft(TestCase):
         win._charts = [chart]
         dialog_class = self._make_dialog_mock(expr, step_points)
         captured_expressions = []
+
         def fake_expr_mgr(expressions):
             captured_expressions.extend(expressions)
             return MagicMock()
+
         with patch("viewer.main_window.FftDialog", dialog_class), \
              patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
              patch("viewer.main_window.MainWindow", return_value=MagicMock(_initial_selected_steps=None)), \
