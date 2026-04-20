@@ -11,6 +11,10 @@
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
   "chat.tools.terminal.autoApprove": {
-    "apply_patch": true
+    "gh": true,
+    "git add": true,
+    "git commit": true,
+    "git push": true,
+    "git switch": true
   }
 }
