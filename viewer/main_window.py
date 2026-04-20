@@ -525,42 +525,46 @@ class MainWindow(QMainWindow):
         normalize = dialog.result_normalize
         keep_dc = dialog.result_keep_dc
         output = dialog.result_output
-        # number of samples per step (abscissa is already trimmed to one period)
+        # number of samples per step (abscissa is already trimmed to one step)
         step_points = len(self._abscissa.data)
         # shared abscissa slice — identical across all steps since the abscissa is periodic
         x = self._abscissa.data[from_index:to_index]
-        # accumulate per-expression FFT arrays for each step; outer list is per-expression,
-        # inner list is one array per step
-        per_expression_steps: list[list[np.ndarray]] = [[] for _ in result_expressions]
-        # frequencies are the same for every step; capture once from the first batch
-        frequencies: np.ndarray | None = None
-        # loop all steps so the FFT window always has the full dataset
-        for step in range(self._steps):
-            # build signal matrix for this step: each row is one expression, columns are time samples
-            y_matrix = np.vstack([expression.data[step * step_points:(step + 1) * step_points][from_index:to_index] for expression in result_expressions])
-            try:
-                # compute FFT for all selected expressions in a single batch call
-                step_frequencies, fft_matrix = compute_fft_many(x, y_matrix, window, zero_pad, normalize, output, keep_dc)
-            except ValueError:
-                # log exception and abort when the shared batch computation fails
-                logger.exception("Batch FFT computation failed for chart %d step %d", chart_index, step)
-                # exit
-                return
-            # capture frequencies once; they are the same for every step
-            if frequencies is None:
-                frequencies = step_frequencies
-            # accumulate per-expression FFT results for this step
-            for expr_idx, fft_values in enumerate(fft_matrix):
-                per_expression_steps[expr_idx].append(fft_values)
+        # build one batch matrix for all expressions and all steps in expression-major order;
+        # rows are [expr0-step0, expr0-step1, ..., exprN-stepS]
+        signal_count = len(result_expressions)
+        sample_count = to_index - from_index
+        y_matrix = np.empty((signal_count * self._steps, sample_count))
+        # fill each expression block with all step slices at once
+        for expr_index, expression in enumerate(result_expressions):
+            row_start = expr_index * self._steps
+            row_end = row_start + self._steps
+            step_matrix = expression.data.reshape(self._steps, step_points)[:, from_index:to_index]
+            y_matrix[row_start:row_end] = step_matrix
+        try:
+            # compute FFT for all steps and expressions in one call
+            frequencies, fft_matrix = compute_fft_many(x, y_matrix, window, zero_pad, normalize, output, keep_dc)
+        except ValueError:
+            # log exception and abort
+            logger.exception("Batch FFT computation failed for chart %d", chart_index)
+            # exit
+            return
         # guard against an unexpectedly empty frequency axis
-        if frequencies is None or len(frequencies) == 0:
+        if len(frequencies) == 0:
             # log error and abort when no frequencies are returned
             logger.error("FFT computation returned an empty frequency axis for chart %d", chart_index)
             # exit
             return
-        # build FFT expressions: concatenate per-step arrays so data layout mirrors the source simulation
-        # (steps * freq_points values, step segments laid out contiguously)
-        fft_expressions = [Expression(f"FFT({expression.name.replace(' ', '')})", np.concatenate(step_fft_list), "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else expression.unit)) for expression, step_fft_list in zip(result_expressions, per_expression_steps)]
+        # number of frequency bins produced per step
+        freq_points = len(frequencies)
+        # build FFT expressions from row slices in the batched output matrix;
+        # each expression keeps step-major contiguous layout: [step0, step1, ..., stepS]
+        fft_expressions: list[Expression] = []
+        for expr_index, expression in enumerate(result_expressions):
+            row_start = expr_index * self._steps
+            row_end = row_start + self._steps
+            expression_data = fft_matrix[row_start:row_end].reshape(self._steps * freq_points)
+            expression_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else expression.unit)
+            fft_expressions.append(Expression(f"FFT({expression.name.replace(' ', '')})", expression_data, expression_unit))
         # create frequency expression — length matches a single step period (freq_points)
         freq_expression = Expression("Frequency", frequencies, "Hz")
         # build expression manager with frequency abscissa and all FFT results

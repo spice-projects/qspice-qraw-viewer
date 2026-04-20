@@ -522,10 +522,48 @@ class TestMultiStepFft(TestCase):
              patch("viewer.main_window.compute_fft_many") as mock_fft, \
              patch("viewer.main_window.ExpressionManager"):
             freq = np.linspace(0, 500, 33)
-            mock_fft.return_value = (freq, np.ones((1, 33)))
+            mock_fft.return_value = (freq, np.ones((steps, 33)))
             win._on_menu_fft(0)
-        # assert — compute_fft_many called once per step
-        self.assertEqual(mock_fft.call_count, steps)
+        # assert — one batched call computes all steps at once
+        self.assertEqual(mock_fft.call_count, 1)
+
+    def test_fft_batches_all_steps_and_expressions_in_single_matrix(self):
+        # arrange
+        steps = 3
+        step_points = 8
+        win = self._make_fft_win(steps, step_points)
+        expr_a = Expression("V(a)", np.concatenate([np.full(step_points, 10.0 + s) for s in range(steps)]), "V")
+        expr_b = Expression("V(b)", np.concatenate([np.full(step_points, 20.0 + s) for s in range(steps)]), "V")
+        chart = MagicMock()
+        chart.expressions = [expr_a, expr_b]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {0, 1, 2}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr_a, step_points)
+        dialog = dialog_class.return_value
+        dialog.result_expressions = [expr_a, expr_b]
+        captured_matrix = []
+
+        def fake_fft(x, y_matrix, *args, **kwargs):
+            captured_matrix.append(y_matrix.copy())
+            return np.linspace(0, 500, 5), np.ones((y_matrix.shape[0], 5))
+
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
+             patch("viewer.main_window.MainWindow", return_value=MagicMock(_initial_selected_steps=None)), \
+             patch("viewer.main_window.compute_fft_many", side_effect=fake_fft), \
+             patch("viewer.main_window.ExpressionManager"):
+            win._on_menu_fft(0)
+        # assert — matrix rows are expression-major with all steps included
+        self.assertEqual(len(captured_matrix), 1)
+        y_matrix = captured_matrix[0]
+        self.assertEqual(y_matrix.shape, (steps * 2, step_points))
+        np.testing.assert_array_equal(y_matrix[0], np.full(step_points, 10.0))
+        np.testing.assert_array_equal(y_matrix[1], np.full(step_points, 11.0))
+        np.testing.assert_array_equal(y_matrix[2], np.full(step_points, 12.0))
+        np.testing.assert_array_equal(y_matrix[3], np.full(step_points, 20.0))
+        np.testing.assert_array_equal(y_matrix[4], np.full(step_points, 21.0))
+        np.testing.assert_array_equal(y_matrix[5], np.full(step_points, 22.0))
 
     def test_fft_qraw_built_with_all_steps(self):
         # arrange
@@ -557,7 +595,7 @@ class TestMultiStepFft(TestCase):
              patch("viewer.main_window.compute_fft_many") as mock_fft, \
              patch("viewer.main_window.ExpressionManager"):
             freq = np.linspace(0, 500, 33)
-            mock_fft.return_value = (freq, np.ones((1, 33)))
+            mock_fft.return_value = (freq, np.ones((steps, 33)))
             win._on_menu_fft(0)
         # assert — QRawFile receives steps=3 (all source steps, not just selected)
         self.assertEqual(captured_steps[0], steps)
@@ -589,7 +627,7 @@ class TestMultiStepFft(TestCase):
              patch("viewer.main_window.compute_fft_many") as mock_fft, \
              patch("viewer.main_window.ExpressionManager"):
             freq = np.linspace(0, 500, 33)
-            mock_fft.return_value = (freq, np.ones((1, 33)))
+            mock_fft.return_value = (freq, np.ones((steps, 33)))
             win._on_menu_fft(0)
         # assert — FFT window initial step selection matches source chart selected steps
         self.assertEqual(created_windows[0]._initial_selected_steps, {1, 2})
@@ -622,7 +660,7 @@ class TestMultiStepFft(TestCase):
              patch("viewer.main_window.ExpressionManager"), \
              patch("viewer.main_window._register_fft_window") as mock_register:
             freq = np.linspace(0, 500, 33)
-            mock_fft.return_value = (freq, np.ones((1, 33)))
+            mock_fft.return_value = (freq, np.ones((steps, 33)))
             win._on_menu_fft(0)
         # assert
         mock_register.assert_called_once_with(created_windows[0])
@@ -653,13 +691,50 @@ class TestMultiStepFft(TestCase):
              patch("viewer.main_window.compute_fft_many") as mock_fft, \
              patch("viewer.main_window.ExpressionManager", fake_expr_mgr):
             freq = np.linspace(0, 500, freq_points)
-            mock_fft.return_value = (freq, np.ones((1, freq_points)))
+            mock_fft.return_value = (freq, np.ones((steps, freq_points)))
             win._on_menu_fft(0)
         # assert — FFT expression data length = steps * freq_points; abscissa = freq_points only
         fft_expr = [e for e in captured_expressions if e.name != "Frequency"][0]
         abscissa_expr = [e for e in captured_expressions if e.name == "Frequency"][0]
         self.assertEqual(len(fft_expr.data), steps * freq_points)
         self.assertEqual(len(abscissa_expr.data), freq_points)
+
+    def test_fft_expression_data_preserves_step_order(self):
+        # arrange
+        steps = 3
+        step_points = 64
+        freq_points = 33
+        win = self._make_fft_win(steps, step_points)
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {0, 1, 2}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        captured_expressions = []
+
+        def fake_expr_mgr(expressions):
+            captured_expressions.extend(expressions)
+            return MagicMock()
+
+        def fake_fft(x, y_matrix, *args, **kwargs):
+            # one row per step for this single expression; emit distinct value per row
+            row_values = np.array([np.full(freq_points, float(row_index)) for row_index in range(y_matrix.shape[0])])
+            return np.linspace(0, 500, freq_points), row_values
+        # act
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
+             patch("viewer.main_window.MainWindow", return_value=MagicMock(_initial_selected_steps=None)), \
+             patch("viewer.main_window.compute_fft_many", side_effect=fake_fft), \
+             patch("viewer.main_window.ExpressionManager", fake_expr_mgr):
+            win._on_menu_fft(0)
+        # assert — each step segment in the output buffer matches that step's value
+        fft_expr = [e for e in captured_expressions if e.name != "Frequency"][0]
+        for s in range(steps):
+            segment = fft_expr.data[s * freq_points:(s + 1) * freq_points]
+            np.testing.assert_array_equal(segment, np.full(freq_points, float(s)))
 
 
 class TestComputeDecimateTarget(TestCase):
