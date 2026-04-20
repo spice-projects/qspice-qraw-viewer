@@ -77,6 +77,35 @@ class TestDecimationAlgorithm(TestCase):
     def test_xy_average_short_circuit(self):
         self._assert_xy_short_circuit(DecimationAlgorithm.AVERAGE)
 
+    def test_xy_short_circuit_strided_inputs_become_contiguous(self):
+        # arrange
+        matrix = np.arange(400, dtype=np.float64).reshape(100, 4)
+        x = matrix[:, 0]
+        y = matrix[:, 1]
+        for algorithm in [DecimationAlgorithm.NTH_POINT, DecimationAlgorithm.MIN_MAX, DecimationAlgorithm.M4, DecimationAlgorithm.LTTB, DecimationAlgorithm.AVERAGE]:
+            # test for algo
+            with self.subTest(algorithm=algorithm):
+                # act
+                x_out, y_out = decimate_xy(x, y, 100, algorithm)
+                # assert
+                self.assertTrue(x_out.flags["C_CONTIGUOUS"])
+                self.assertTrue(y_out.flags["C_CONTIGUOUS"])
+                np.testing.assert_array_equal(x_out, x)
+                np.testing.assert_array_equal(y_out, y)
+
+    def test_xy_none_strided_inputs_become_contiguous(self):
+        # arrange
+        matrix = np.arange(400, dtype=np.float64).reshape(100, 4)
+        x = matrix[:, 2]
+        y = matrix[:, 3]
+        # act
+        x_out, y_out = decimate_xy(x, y, 10, DecimationAlgorithm.NONE)
+        # assert
+        self.assertTrue(x_out.flags["C_CONTIGUOUS"])
+        self.assertTrue(y_out.flags["C_CONTIGUOUS"])
+        np.testing.assert_array_equal(x_out, x)
+        np.testing.assert_array_equal(y_out, y)
+
     def _assert_length_le_target(self, algorithm: DecimationAlgorithm, target: int = 50):
         # arrange
         values = _sine(10_000)
