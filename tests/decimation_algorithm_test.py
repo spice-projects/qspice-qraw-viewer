@@ -313,8 +313,10 @@ class TestDecimationAlgorithm(TestCase):
         self.assertEqual(captured_x[0].dtype, np.float64)
         self.assertTrue(captured_x[0].flags.c_contiguous)
 
-    def test_xy_lttb_converts_non_contiguous_float64_x_to_contiguous(self):
-        # arrange
+    def test_xy_lttb_reuses_non_contiguous_float64_x(self):
+        # arrange — strided (non-contiguous) float64 slice; no copy needed since
+        # numpy arithmetic works on strided arrays and x[indices] always returns
+        # a new contiguous array regardless of input contiguity
         x_base = np.linspace(0.0, 1.0, 200, dtype=np.float64)
         x = x_base[::2]
         y = np.sin(x)
@@ -328,9 +330,7 @@ class TestDecimationAlgorithm(TestCase):
             decimate_xy(x, y, 20, DecimationAlgorithm.LTTB)
         # assert
         self.assertEqual(len(captured_x), 1)
-        self.assertIsNot(captured_x[0], x)
-        self.assertEqual(captured_x[0].dtype, np.float64)
-        self.assertTrue(captured_x[0].flags.c_contiguous)
+        self.assertIs(captured_x[0], x)
 
     def test_average_output_values_are_bucket_means(self):
         # arrange

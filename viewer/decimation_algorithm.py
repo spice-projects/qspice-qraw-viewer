@@ -403,12 +403,10 @@ def decimate_xy(x: np.ndarray, y: np.ndarray, target: int, algorithm: Decimation
     elif algorithm == DecimationAlgorithm.M4:
         indices = _m4_indices(y, target)
     elif algorithm == DecimationAlgorithm.LTTB:
-        # LTTB needs actual x coordinates for accurate triangle area calculation
-        # avoid dtype/contiguity conversion when x is already suitable
-        if x.dtype == np.float64 and x.flags.c_contiguous:
-            x_for_lttb = x
-        else:
-            x_for_lttb = np.ascontiguousarray(x, dtype=np.float64)
+        # LTTB needs float64 x for triangle area arithmetic; contiguity is not
+        # required here because numpy handles strided arrays natively and the
+        # return value (x[indices]) is always a new c-contiguous array
+        x_for_lttb = x if x.dtype == np.float64 else x.astype(np.float64)
         indices = _lttb_indices(x_for_lttb, y, target)
     else:
         raise ValueError(f"Unknown decimation algorithm: {algorithm}")
