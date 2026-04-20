@@ -278,47 +278,10 @@ class TestDecimationAlgorithm(TestCase):
         self.assertEqual(len(y_out), target)
         self.assertTrue(_xy_pairs_coherent(x_out, y_out, x, y))
 
-    def test_xy_lttb_reuses_float64_contiguous_x(self):
-        # arrange
+    def test_xy_lttb_passes_x_through_unchanged(self):
+        # arrange — x is always float64 at this call site (QRAW binary format
+        # guarantees <f8; rfftfreq also returns float64); no conversion should occur
         x = np.linspace(0.0, 1.0, 100, dtype=np.float64)
-        y = np.sin(x)
-        captured_x = []
-        # act
-        with patch("viewer.decimation_algorithm._lttb_indices") as mock_lttb:
-            def _capture_x(x_arg: np.ndarray, y_arg: np.ndarray, target_arg: int) -> np.ndarray:
-                captured_x.append(x_arg)
-                return np.linspace(0, len(y_arg) - 1, num=target_arg, dtype=np.int64)
-            mock_lttb.side_effect = _capture_x
-            decimate_xy(x, y, 20, DecimationAlgorithm.LTTB)
-        # assert
-        self.assertEqual(len(captured_x), 1)
-        self.assertIs(captured_x[0], x)
-
-    def test_xy_lttb_converts_non_contiguous_x_to_float64(self):
-        # arrange
-        x_base = np.linspace(0.0, 1.0, 200, dtype=np.float32)
-        x = x_base[::2]
-        y = np.sin(x.astype(np.float64))
-        captured_x = []
-        # act
-        with patch("viewer.decimation_algorithm._lttb_indices") as mock_lttb:
-            def _capture_x(x_arg: np.ndarray, y_arg: np.ndarray, target_arg: int) -> np.ndarray:
-                captured_x.append(x_arg)
-                return np.linspace(0, len(y_arg) - 1, num=target_arg, dtype=np.int64)
-            mock_lttb.side_effect = _capture_x
-            decimate_xy(x, y, 20, DecimationAlgorithm.LTTB)
-        # assert
-        self.assertEqual(len(captured_x), 1)
-        self.assertIsNot(captured_x[0], x)
-        self.assertEqual(captured_x[0].dtype, np.float64)
-        self.assertTrue(captured_x[0].flags.c_contiguous)
-
-    def test_xy_lttb_reuses_non_contiguous_float64_x(self):
-        # arrange — strided (non-contiguous) float64 slice; no copy needed since
-        # numpy arithmetic works on strided arrays and x[indices] always returns
-        # a new contiguous array regardless of input contiguity
-        x_base = np.linspace(0.0, 1.0, 200, dtype=np.float64)
-        x = x_base[::2]
         y = np.sin(x)
         captured_x = []
         # act

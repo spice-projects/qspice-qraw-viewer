@@ -403,11 +403,10 @@ def decimate_xy(x: np.ndarray, y: np.ndarray, target: int, algorithm: Decimation
     elif algorithm == DecimationAlgorithm.M4:
         indices = _m4_indices(y, target)
     elif algorithm == DecimationAlgorithm.LTTB:
-        # LTTB needs float64 x for triangle area arithmetic; contiguity is not
-        # required here because numpy handles strided arrays natively and the
-        # return value (x[indices]) is always a new c-contiguous array
-        x_for_lttb = x if x.dtype == np.float64 else x.astype(np.float64)
-        indices = _lttb_indices(x_for_lttb, y, target)
+        # x is always float64 at this call site (binary format guarantees <f8 for
+        # both real and complex QRAW files; rfftfreq also returns float64 for the
+        # FFT synthetic path) — pass it directly with no conversion
+        indices = _lttb_indices(x, y, target)
     else:
         raise ValueError(f"Unknown decimation algorithm: {algorithm}")
     # exit
