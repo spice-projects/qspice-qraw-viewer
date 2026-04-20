@@ -396,6 +396,16 @@ class TestMainWindowSlots(TestCase):
         # actual assertion: method exists and returns something (integration check is enough here)
         self.assertIsNotNone(result)
 
+    def test_close_event_unregisters_fft_window_from_application_registry(self):
+        # arrange
+        win = MainWindow.__new__(MainWindow)
+        event = MagicMock()
+        # act
+        with patch("viewer.main_window._unregister_fft_window") as mock_unregister:
+            win.closeEvent(event)
+        # assert
+        mock_unregister.assert_called_once_with(win)
+
     def test_pointer_moved_uses_chart_public_sampling_api(self):
         # arrange
         win = self._make_win(total=20)
@@ -576,6 +586,37 @@ class TestMultiStepFft(TestCase):
             win._on_menu_fft(0)
         # assert — FFT window initial step selection matches source chart selected steps
         self.assertEqual(created_windows[0]._initial_selected_steps, {1, 2})
+
+    def test_fft_window_is_registered_in_application_registry(self):
+        # arrange
+        steps = 2
+        step_points = 64
+        win = self._make_fft_win(steps, step_points)
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {0, 1}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        created_windows = []
+        def fake_main_window(qraw, source_qraw_path=None):
+            win2 = MagicMock()
+            win2._initial_selected_steps = None
+            created_windows.append(win2)
+            return win2
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
+             patch("viewer.main_window.MainWindow", fake_main_window), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager"), \
+             patch("viewer.main_window._register_fft_window") as mock_register:
+            freq = np.linspace(0, 500, 33)
+            mock_fft.return_value = (freq, np.ones((1, 33)))
+            win._on_menu_fft(0)
+        # assert
+        mock_register.assert_called_once_with(created_windows[0])
 
     def test_fft_expression_data_length_is_steps_times_freq_points(self):
         # arrange

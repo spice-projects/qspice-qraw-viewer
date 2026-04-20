@@ -35,6 +35,18 @@ _BG = "#1a1b1e"
 # minimum interval between status-bar updates (≈30 fps)
 _MIN_STATUS_INTERVAL = 1.0 / 30
 
+# application-level registry keeps fft result windows alive independently
+# of the source main window that created them
+_FFT_WINDOWS: set[QMainWindow] = set()
+
+
+def _register_fft_window(window: QMainWindow) -> None:
+    _FFT_WINDOWS.add(window)
+
+
+def _unregister_fft_window(window: QMainWindow) -> None:
+    _FFT_WINDOWS.discard(window)
+
 
 def _format_value(value: float, unit: str) -> str:
     """Format a numeric value with SI prefix and unit, mirroring the QML applyUnit function."""
@@ -183,8 +195,6 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(f"QMainWindow {{ background: {_BG}; }}")
         # initialize data structures
         self._charts: list[Chart] = []
-        # keep FFT result windows alive to prevent garbage collection
-        self._fft_windows: list[MainWindow] = []
         # optional initial step selection applied when charts are first created (used by FFT windows to
         # pre-focus on the same steps the user was viewing in the source chart)
         self._initial_selected_steps: set[int] | None = None
@@ -211,6 +221,14 @@ class MainWindow(QMainWindow):
 
     def sizeHint(self):
         return QSize(1200, 800)
+
+    def closeEvent(self, event) -> None:
+        # release application-level fft window ownership when this window closes
+        _unregister_fft_window(self)
+        # delegate to the Qt base class when available
+        close_event = getattr(super(), "closeEvent", None)
+        if close_event is not None:
+            close_event(event)
 
     @Slot(QQuickView.Status)
     def _on_qml_ready(self, status: QQuickView.Status):
@@ -557,8 +575,8 @@ class MainWindow(QMainWindow):
         fft_window = MainWindow(fft_qraw, source_qraw_path=self._qraw_path)
         # pre-focus the FFT window on the same steps the user was viewing in the source chart
         fft_window._initial_selected_steps = chart.selected_steps
-        # keep reference alive to prevent garbage collection
-        self._fft_windows.append(fft_window)
+        # keep reference alive independently of the source main window
+        _register_fft_window(fft_window)
         # show the FFT result window
         fft_window.show()
 
