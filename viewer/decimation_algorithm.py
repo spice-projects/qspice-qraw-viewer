@@ -403,8 +403,10 @@ def decimate_xy(x: np.ndarray, y: np.ndarray, target: int, algorithm: Decimation
     elif algorithm == DecimationAlgorithm.M4:
         indices = _m4_indices(y, target)
     elif algorithm == DecimationAlgorithm.LTTB:
-        # LTTB needs actual x coordinates for accurate triangle area calculation
-        indices = _lttb_indices(x.astype(np.float64), y, target)
+        # x is always float64 at this call site (binary format guarantees <f8 for
+        # both real and complex QRAW files; rfftfreq also returns float64 for the
+        # FFT synthetic path) — pass it directly with no conversion
+        indices = _lttb_indices(x, y, target)
     else:
         raise ValueError(f"Unknown decimation algorithm: {algorithm}")
     # exit
