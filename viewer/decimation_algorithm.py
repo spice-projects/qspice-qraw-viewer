@@ -378,14 +378,14 @@ def decimate_xy(x: np.ndarray, y: np.ndarray, target: int, algorithm: Decimation
         raise ValueError("x and y must have the same length")
     if target < 1 and algorithm != DecimationAlgorithm.NONE:
         raise ValueError("target must be >= 1")
-    # NONE — pass both arrays through unchanged
+    # NONE — pass both arrays through unchanged while ensuring C-contiguous buffers for downstream Qt upload paths
     if algorithm == DecimationAlgorithm.NONE:
-        return x, y
+        return np.ascontiguousarray(x), np.ascontiguousarray(y)
     # vector length
     length = len(y)
-    # if we have fewer points than the target, just return the original arrays
+    # if we have fewer points than the target, return arrays directly while ensuring C-contiguous buffers for downstream Qt upload paths
     if length <= target:
-        return x, y
+        return np.ascontiguousarray(x), np.ascontiguousarray(y)
     # AVERAGE — bucket both x and y with the same bucket boundaries;
     # ceiling division ensures number_of_buckets <= target
     if algorithm == DecimationAlgorithm.AVERAGE:
