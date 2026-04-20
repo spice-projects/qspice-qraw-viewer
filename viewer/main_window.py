@@ -35,17 +35,17 @@ _BG = "#1a1b1e"
 # minimum interval between status-bar updates (≈30 fps)
 _MIN_STATUS_INTERVAL = 1.0 / 30
 
-# application-level registry keeps fft result windows alive independently
+# application-level registry keeps child windows alive independently
 # of the source main window that created them
-_FFT_WINDOWS: set[QMainWindow] = set()
+_CHILD_WINDOWS: set[QMainWindow] = set()
 
 
-def _register_fft_window(window: QMainWindow) -> None:
-    _FFT_WINDOWS.add(window)
+def _register_child_window(window: QMainWindow) -> None:
+    _CHILD_WINDOWS.add(window)
 
 
-def _unregister_fft_window(window: QMainWindow) -> None:
-    _FFT_WINDOWS.discard(window)
+def _unregister_child_window(window: QMainWindow) -> None:
+    _CHILD_WINDOWS.discard(window)
 
 
 def _format_value(value: float, unit: str) -> str:
@@ -162,12 +162,14 @@ def _compute_decimate_target(screen) -> int:
 
 class MainWindow(QMainWindow):
 
-    def __init__(self, qraw_file: QRawFile, source_qraw_path: Path | None = None):
+    def __init__(self, qraw_file: QRawFile, source_qraw_path: Path | None = None, start_empty: bool = False):
         super().__init__()
         # load and set the application icon
         icon = load_app_icon()
         if not icon.isNull():
             self.setWindowIcon(icon)
+        # keep a reference to the source qraw object for creating secondary windows
+        self._qraw_file = qraw_file
         # extract information from file
         self._default_chart_type = qraw_file.chart_type
         self._abscissa = qraw_file.abscissa
@@ -175,7 +177,7 @@ class MainWindow(QMainWindow):
         self._expression_manager = qraw_file.expression_manager
         # normalize numpy scalar to built-in int for stable Qt property marshalling
         self._steps = int(qraw_file.steps)
-        self._plot_suggestions = qraw_file.get_plot_suggestions()
+        self._plot_suggestions = [] if start_empty else qraw_file.get_plot_suggestions()
         # check if we have multiple steps and if so, precompute the step parameter combinations for the step tool dialog; this is done here once to avoid redundant work in the dialog when the user opens it multiple times, and also to keep the dialog code simpler and focused on UI logic rather than data processing
         if self._steps > 1:
             # qraw_file already trims the abscissa to a single step period
@@ -223,8 +225,8 @@ class MainWindow(QMainWindow):
         return QSize(1200, 800)
 
     def closeEvent(self, event) -> None:
-        # release application-level fft window ownership when this window closes
-        _unregister_fft_window(self)
+        # release application-level child window ownership when this window closes
+        _unregister_child_window(self)
         # delegate to the Qt base class when available
         close_event = getattr(super(), "closeEvent", None)
         if close_event is not None:
@@ -248,8 +250,9 @@ class MainWindow(QMainWindow):
         self._root.menuZoomAbscissaExtent.connect(self._on_menu_zoom_abscissa_extent)
         self._root.menuAddRemovePlots.connect(self._on_menu_add_remove_plots)
         self._root.menuDeleteAllPlots.connect(self._on_menu_delete_all_plots)
-        self._root.menuAddWindow.connect(self._on_menu_add_window)
-        self._root.menuDeleteWindow.connect(self._on_menu_delete_window)
+        self._root.menuAddChart.connect(self._on_menu_add_chart)
+        self._root.menuDeleteChart.connect(self._on_menu_delete_chart)
+        self._root.menuNewWindow.connect(self._on_menu_new_window)
         self._root.menuFft.connect(self._on_menu_fft)
         self._root.menuStepTool.connect(self._on_menu_step_tool)
         # connect pointer hover signals to update the status bar
@@ -282,10 +285,14 @@ class MainWindow(QMainWindow):
 
         # Window menu
         window_menu = menu_bar.addMenu("&Window")
-        # Window | Add Window
-        add_window_action = QAction("Add Window", self)
-        add_window_action.triggered.connect(lambda: self._on_menu_add_window(len(self._charts) - 1))
-        window_menu.addAction(add_window_action)
+        # Window | Add Chart
+        add_chart_action = QAction("Add Chart", self)
+        add_chart_action.triggered.connect(lambda: self._on_menu_add_chart(len(self._charts) - 1))
+        window_menu.addAction(add_chart_action)
+        # Window | New Window
+        new_window_action = QAction("New Window", self)
+        new_window_action.triggered.connect(self._on_menu_new_window)
+        window_menu.addAction(new_window_action)
 
         # Help menu
         help_menu = menu_bar.addMenu("&Help")
@@ -463,19 +470,30 @@ class MainWindow(QMainWindow):
         chart.clear()
 
     @Slot(int)
-    def _on_menu_add_window(self, chart_index: int):
+    def _on_menu_add_chart(self, chart_index: int):
         # log information
-        logger.debug("User requested adding a new window at index: %d", chart_index)
+        logger.debug("User requested adding a new chart at index: %d", chart_index)
         # add a new chart with no pre-populated expressions
         self._add_chart(self._default_chart_type, [])
 
     @Slot(int)
-    def _on_menu_delete_window(self, chart_index: int):
+    def _on_menu_delete_chart(self, chart_index: int):
         # log information
         logger.debug("User requested deleting chart at index: %d", chart_index)
         # delete chart at index (do ot swap these two statements, C++ objects get deleted immediately when their Python reference is deleted, so we need to remove the chart from the UI before deleting the Python object)
         self._root.removeChart(chart_index)
         del self._charts[chart_index]
+
+    @Slot()
+    def _on_menu_new_window(self):
+        # log information
+        logger.debug("User requested opening a new window")
+        # create a new independent main window sharing the same source data and path
+        new_window = MainWindow(self._qraw_file, source_qraw_path=self._qraw_path, start_empty=True)
+        # keep reference alive independently of the source main window
+        _register_child_window(new_window)
+        # show the new window
+        new_window.show()
 
     @Slot(int)
     def _on_menu_step_tool(self, chart_index: int):
@@ -584,7 +602,7 @@ class MainWindow(QMainWindow):
         # pre-focus the FFT window on the same steps the user was viewing in the source chart
         fft_window._initial_selected_steps = chart.selected_steps
         # keep reference alive independently of the source main window
-        _register_fft_window(fft_window)
+        _register_child_window(fft_window)
         # show the FFT result window
         fft_window.show()
 
