@@ -533,15 +533,18 @@ class MainWindow(QMainWindow):
         # rows are [expr0-step0, expr0-step1, ..., exprN-stepS]
         signal_count = len(result_expressions)
         sample_count = to_index - from_index
+        # allocate dense batch buffer once; this owns the copied FFT input payload
         y_matrix = np.empty((signal_count * self._steps, sample_count))
         # fill each expression block with all step slices at once
         for expr_index, expression in enumerate(result_expressions):
             row_start = expr_index * self._steps
             row_end = row_start + self._steps
+            # reshape + slice are view operations when source layout is step-major contiguous
             step_matrix = expression.data.reshape(self._steps, step_points)[:, from_index:to_index]
+            # copy step block into the preallocated batch buffer
             y_matrix[row_start:row_end] = step_matrix
         try:
-            # compute FFT for all steps and expressions in one call
+            # fft internals allocate output arrays (spectrum/frequency/value matrices)
             frequencies, fft_matrix = compute_fft_many(x, y_matrix, window, zero_pad, normalize, output, keep_dc)
         except ValueError:
             # log exception and abort
@@ -562,6 +565,7 @@ class MainWindow(QMainWindow):
         for expr_index, expression in enumerate(result_expressions):
             row_start = expr_index * self._steps
             row_end = row_start + self._steps
+            # row slice is a view; reshape keeps a view for contiguous row blocks
             expression_data = fft_matrix[row_start:row_end].reshape(self._steps * freq_points)
             expression_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else expression.unit)
             fft_expressions.append(Expression(f"FFT({expression.name.replace(' ', '')})", expression_data, expression_unit))
