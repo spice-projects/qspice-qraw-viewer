@@ -19,8 +19,9 @@ Item {
     signal menuZoomAbscissaExtent(int chartIndex)
     signal menuAddRemovePlots(int chartIndex)
     signal menuDeleteAllPlots(int chartIndex)
-    signal menuAddWindow(int chartIndex)
-    signal menuDeleteWindow(int chartIndex)
+    signal menuAddChart(int chartIndex)
+    signal menuDeleteChart(int chartIndex)
+    signal menuNewWindow()
     signal menuFft(int chartIndex)
     signal menuStepTool(int chartIndex)
     signal pointerMoved(int chartIndex, real xRatio)
@@ -43,7 +44,7 @@ Item {
         signal menuZoomAbscissaExtent
         signal menuAddRemovePlots
         signal menuDeleteAllPlots
-        signal menuDeleteWindow
+        signal menuDeleteChart
         // carries panel-local mouse coords so the root can position the shared menu
         signal menuOpenRequested(real localX, real localY, int seriesCount)
         signal pointerMoved(real xRatio)
@@ -532,7 +533,7 @@ Item {
                 onMenuZoomAbscissaExtent: root.menuZoomAbscissaExtent(index)
                 onMenuAddRemovePlots: root.menuAddRemovePlots(index)
                 onMenuDeleteAllPlots: root.menuDeleteAllPlots(index)
-                onMenuDeleteWindow: root.menuDeleteWindow(index)
+                onMenuDeleteChart: root.menuDeleteChart(index)
                 // bubble pointer hover signals up to root, adding chartIndex
                 onPointerMoved: xRatio => root.pointerMoved(index, xRatio)
                 onPointerExited: root.pointerExited(index)
@@ -614,13 +615,18 @@ Item {
             }
             ContextMenuSeparator {}
             ContextMenuItem {
-                itemText: "Add Window"
-                onTriggered: root.menuAddWindow(root._activeChartIndex)
+                itemText: "Add Chart"
+                onTriggered: root.menuAddChart(root._activeChartIndex)
             }
             ContextMenuItem {
-                itemText: "Delete Window"
+                itemText: "Delete Chart"
                 enabled: chartsModel.count > 1
-                onTriggered: root.menuDeleteWindow(root._activeChartIndex)
+                onTriggered: root.menuDeleteChart(root._activeChartIndex)
+            }
+            ContextMenuSeparator {}
+            ContextMenuItem {
+                itemText: "New Window"
+                onTriggered: root.menuNewWindow()
             }
         }
     }

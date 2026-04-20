@@ -317,7 +317,7 @@ class TestMainWindowSlots(TestCase):
         # assert
         chart.clear.assert_called_once_with()
 
-    def test_menu_add_window_appends_chart(self):
+    def test_menu_add_chart_appends_chart(self):
         # arrange
         win = self._make_win()
         win._expression_manager = MagicMock()
@@ -329,11 +329,11 @@ class TestMainWindowSlots(TestCase):
         win._root = MagicMock()
         win._root.getChart.return_value = MagicMock()
         # act
-        win._on_menu_add_window(0)
+        win._on_menu_add_chart(0)
         # assert — one chart added
         self.assertEqual(len(win._charts), 1)
 
-    def test_menu_delete_window_removes_chart(self):
+    def test_menu_delete_chart_removes_chart(self):
         # arrange
         win = self._make_win()
         win._root = MagicMock()
@@ -341,10 +341,25 @@ class TestMainWindowSlots(TestCase):
         chart1 = MagicMock()
         win._charts = [chart0, chart1]
         # act
-        win._on_menu_delete_window(0)
+        win._on_menu_delete_chart(0)
         # assert — first chart removed; second chart remains
         self.assertEqual(len(win._charts), 1)
         self.assertIs(win._charts[0], chart1)
+
+    def test_menu_new_window_creates_secondary_main_window(self):
+        # arrange
+        win = self._make_win()
+        win._qraw_file = MagicMock()
+        win._qraw_path = MagicMock()
+        created_window = MagicMock()
+        # act
+        with patch("viewer.main_window.MainWindow", return_value=created_window) as mock_main_window, \
+             patch("viewer.main_window._register_child_window") as mock_register:
+            win._on_menu_new_window()
+        # assert
+        mock_main_window.assert_called_once_with(win._qraw_file, source_qraw_path=win._qraw_path, start_empty=True)
+        mock_register.assert_called_once_with(created_window)
+        created_window.show.assert_called_once_with()
 
     def test_on_qml_ready_sets_step_tool_enabled_for_stepped_files(self):
         # arrange
@@ -396,12 +411,12 @@ class TestMainWindowSlots(TestCase):
         # actual assertion: method exists and returns something (integration check is enough here)
         self.assertIsNotNone(result)
 
-    def test_close_event_unregisters_fft_window_from_application_registry(self):
+    def test_close_event_unregisters_child_window_from_application_registry(self):
         # arrange
         win = MainWindow.__new__(MainWindow)
         event = MagicMock()
         # act
-        with patch("viewer.main_window._unregister_fft_window") as mock_unregister:
+        with patch("viewer.main_window._unregister_child_window") as mock_unregister:
             win.closeEvent(event)
         # assert
         mock_unregister.assert_called_once_with(win)
@@ -658,7 +673,7 @@ class TestMultiStepFft(TestCase):
              patch("viewer.main_window.MainWindow", fake_main_window), \
              patch("viewer.main_window.compute_fft_many") as mock_fft, \
              patch("viewer.main_window.ExpressionManager"), \
-             patch("viewer.main_window._register_fft_window") as mock_register:
+             patch("viewer.main_window._register_child_window") as mock_register:
             freq = np.linspace(0, 500, 33)
             mock_fft.return_value = (freq, np.ones((steps, 33)))
             win._on_menu_fft(0)
