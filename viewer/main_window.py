@@ -137,6 +137,17 @@ def _build_step_combinations(expressions: list[Expression], steps: int, step_poi
     return parameter_names, combinations
 
 
+_FALLBACK_DECIMATE_TARGET = 9600
+
+
+def _compute_decimate_target(screen) -> int:
+    # return conservative fallback when no screen is available (headless / early startup)
+    if screen is None:
+        return _FALLBACK_DECIMATE_TARGET
+    # physical pixels: width × clamped device-pixel ratio
+    return screen.size().width() * max(5, int(screen.devicePixelRatio()))
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self, qraw_file: QRawFile, source_qraw_path: Path | None = None):
@@ -174,6 +185,9 @@ class MainWindow(QMainWindow):
         self._charts: list[Chart] = []
         # keep FFT result windows alive to prevent garbage collection
         self._fft_windows: list[MainWindow] = []
+        # optional initial step selection applied when charts are first created (used by FFT windows to
+        # pre-focus on the same steps the user was viewing in the source chart)
+        self._initial_selected_steps: set[int] | None = None
         # keep Jupyter windows alive to prevent garbage collection
         self._jupyter_windows: list[JupyterWindow] = []
         # default horizontal zoom
@@ -191,8 +205,7 @@ class MainWindow(QMainWindow):
         # create the native main menu structure
         self._create_main_menu()
         # decimation target — physical pixels of the primary screen width
-        screen = QGuiApplication.primaryScreen()
-        self._decimate_target = screen.size().width() * max(5, int(screen.devicePixelRatio()))
+        self._decimate_target = _compute_decimate_target(QGuiApplication.primaryScreen())
         # throttle timestamp for status bar updates
         self._last_status_time: float = 0.0
 
@@ -304,6 +317,9 @@ class MainWindow(QMainWindow):
         chart_root = self._root.getChart(chart_index)
         # create chart instance
         chart = Chart(chart_root, chart_type, self._expression_manager, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self._steps, self._decimate_target)
+        # apply initial step selection when provided (e.g. FFT window inheriting source chart visibility)
+        if self._initial_selected_steps is not None:
+            chart.selected_steps = self._initial_selected_steps
         # add it to the list of charts so we can keep track of it
         self._charts.append(chart)
         # render chart
@@ -493,37 +509,54 @@ class MainWindow(QMainWindow):
         output = dialog.result_output
         # number of samples per step (abscissa is already trimmed to one period)
         step_points = len(self._abscissa.data)
-        # shared abscissa slice for all selected expressions
+        # shared abscissa slice — identical across all steps since the abscissa is periodic
         x = self._abscissa.data[from_index:to_index]
-        # build a dense matrix of selected signals using the shared x slice
-        y_matrix = np.vstack([expression.data[0:step_points][from_index:to_index] for expression in result_expressions])
-        try:
-            # compute FFT for all selected expressions in a single batch call
-            frequencies, fft_matrix = compute_fft_many(x, y_matrix, window, zero_pad, normalize, output, keep_dc)
-        except ValueError:
-            # log exception and abort when the shared batch computation fails
-            logger.exception("Batch FFT computation failed for chart %d", chart_index)
-            # exit
-            return
+        # accumulate per-expression FFT arrays for each step; outer list is per-expression,
+        # inner list is one array per step
+        per_expression_steps: list[list[np.ndarray]] = [[] for _ in result_expressions]
+        # frequencies are the same for every step; capture once from the first batch
+        frequencies: np.ndarray | None = None
+        # loop all steps so the FFT window always has the full dataset
+        for step in range(self._steps):
+            # build signal matrix for this step: each row is one expression, columns are time samples
+            y_matrix = np.vstack([expression.data[step * step_points:(step + 1) * step_points][from_index:to_index] for expression in result_expressions])
+            try:
+                # compute FFT for all selected expressions in a single batch call
+                step_frequencies, fft_matrix = compute_fft_many(x, y_matrix, window, zero_pad, normalize, output, keep_dc)
+            except ValueError:
+                # log exception and abort when the shared batch computation fails
+                logger.exception("Batch FFT computation failed for chart %d step %d", chart_index, step)
+                # exit
+                return
+            # capture frequencies once; they are the same for every step
+            if frequencies is None:
+                frequencies = step_frequencies
+            # accumulate per-expression FFT results for this step
+            for expr_idx, fft_values in enumerate(fft_matrix):
+                per_expression_steps[expr_idx].append(fft_values)
         # guard against an unexpectedly empty frequency axis
-        if len(frequencies) == 0:
+        if frequencies is None or len(frequencies) == 0:
             # log error and abort when no frequencies are returned
             logger.error("FFT computation returned an empty frequency axis for chart %d", chart_index)
             # exit
             return
-        # build FFT expressions preserving the selected input order (strip spaces from expression name, it is required for plot suggestions to work correctly in the new window)
-        fft_expressions = [Expression(f"FFT({expression.name.replace(' ', '')})", fft_values, "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else expression.unit)) for expression, fft_values in zip(result_expressions, fft_matrix)]
-        # create frequency expression for the shared abscissa
+        # build FFT expressions: concatenate per-step arrays so data layout mirrors the source simulation
+        # (steps * freq_points values, step segments laid out contiguously)
+        fft_expressions = [Expression(f"FFT({expression.name.replace(' ', '')})", np.concatenate(step_fft_list), "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else expression.unit)) for expression, step_fft_list in zip(result_expressions, per_expression_steps)]
+        # create frequency expression — length matches a single step period (freq_points)
         freq_expression = Expression("Frequency", frequencies, "Hz")
         # build expression manager with frequency abscissa and all FFT results
         expression_manager = ExpressionManager([freq_expression] + fft_expressions)
         # build one «name» group per FFT expression so each gets its own chart
         plot_suggestion = " ".join(f"\xabfft {e.name}\xbb" for e in fft_expressions)
-        # create a synthetic QRawFile with frequency abscissa and all FFT values
-        fft_qraw = QRawFile(filename=self._qraw_path, title=f"FFT \u2013 {', '.join(e.name for e in result_expressions)}", date="", plotname="FFT", complex=False, steps=1, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=plot_suggestion, expression_manager=expression_manager, chart_type="FFT")
+        # create a synthetic QRawFile with frequency abscissa and all FFT values;
+        # steps matches the source simulation so the FFT window inherits full step coverage
+        fft_qraw = QRawFile(filename=self._qraw_path, title=f"FFT \u2013 {', '.join(e.name for e in result_expressions)}", date="", plotname="FFT", complex=False, steps=self._steps, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=plot_suggestion, expression_manager=expression_manager, chart_type="FFT")
         # create a new MainWindow to render the FFT result using the existing infrastructure;
         # pass the original source path so Jupyter always opens the correct .qraw file
         fft_window = MainWindow(fft_qraw, source_qraw_path=self._qraw_path)
+        # pre-focus the FFT window on the same steps the user was viewing in the source chart
+        fft_window._initial_selected_steps = chart.selected_steps
         # keep reference alive to prevent garbage collection
         self._fft_windows.append(fft_window)
         # show the FFT result window
@@ -543,9 +576,7 @@ class MainWindow(QMainWindow):
         # chart at index
         chart = self._charts[chart_index]
         # compute abscissa index within the current zoom window
-        from_index, _, to_index, _ = chart._zoom_window
-        # index within the zoom window based on the supplied x_ratio
-        idx = max(from_index, min(to_index - 1, int(round(from_index + x_ratio * (to_index - from_index)))))
+        idx = chart.sample_index_at_ratio(x_ratio)
         # retrieve the stored abscissa value (may be in log space for decade/octave scales)
         x_stored = float(self._abscissa.data[idx])
         # convert stored value back to physical abscissa value

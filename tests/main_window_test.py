@@ -1,6 +1,6 @@
 import sys
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -11,6 +11,7 @@ sys.modules.setdefault("PySide6.QtGui", MagicMock())
 sys.modules.setdefault("PySide6.QtGraphs", MagicMock())
 sys.modules.setdefault("PySide6.QtQml", MagicMock())
 sys.modules.setdefault("PySide6.QtQuick", MagicMock())
+sys.modules.setdefault("PySide6.QtWebEngineWidgets", MagicMock())
 sys.modules.setdefault("PySide6.QtWidgets", MagicMock())
 # Slot must act as a pass-through decorator so @Slot(...) does not replace the method with a mock
 sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
@@ -18,7 +19,7 @@ sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
 sys.modules["PySide6.QtWidgets"].QMainWindow = type("QMainWindow", (), {})
 
 from viewer.expression import Expression  # noqa: E402
-from viewer.main_window import MainWindow, _build_step_combinations, _format_value, _format_values  # noqa: E402
+from viewer.main_window import MainWindow, _build_step_combinations, _compute_decimate_target, _FALLBACK_DECIMATE_TARGET, _format_value, _format_values  # noqa: E402
 
 
 class TestMainWindow(TestCase):
@@ -324,6 +325,7 @@ class TestMainWindowSlots(TestCase):
         win._steps = 1
         win._decimate_target = 500
         win._plot_suggestions = []
+        win._initial_selected_steps = None
         win._root = MagicMock()
         win._root.getChart.return_value = MagicMock()
         # act
@@ -393,3 +395,266 @@ class TestMainWindowSlots(TestCase):
         # assert — QSize is mocked so just verify the call was made with the right args
         # actual assertion: method exists and returns something (integration check is enough here)
         self.assertIsNotNone(result)
+
+    def test_pointer_moved_uses_chart_public_sampling_api(self):
+        # arrange
+        win = self._make_win(total=20)
+        win._abscissa = MagicMock(unit="s", data=list(range(20)), values=list(range(20)))
+        win._abscissa.name = "time"
+        win._abscissa_scale = "linear"
+        win._last_status_time = 0.0
+        win.statusBar = MagicMock(return_value=MagicMock())
+        chart = MagicMock()
+        chart.sample_index_at_ratio.return_value = 7
+        chart.sample_at.return_value = [("V(out)", "V", [1.23])]
+        win._charts = [chart]
+        # act
+        win._on_pointer_moved(0, 0.35)
+        # assert
+        chart.sample_index_at_ratio.assert_called_once_with(0.35)
+        chart.sample_at.assert_called_once_with(0.35)
+
+    def test_pointer_moved_ignores_invalid_chart_index(self):
+        # arrange
+        win = self._make_win(total=20)
+        win._last_status_time = 0.0
+        win.statusBar = MagicMock(return_value=MagicMock())
+        chart = MagicMock()
+        win._charts = [chart]
+        # act
+        win._on_pointer_moved(99, 0.5)
+        # assert
+        chart.sample_index_at_ratio.assert_not_called()
+        chart.sample_at.assert_not_called()
+
+    def test_pointer_moved_updates_status_bar_message(self):
+        # arrange
+        win = self._make_win(total=20)
+        win._abscissa = MagicMock(unit="s", data=list(range(20)), values=list(range(20)))
+        win._abscissa.name = "time"
+        win._abscissa_scale = "linear"
+        win._last_status_time = 0.0
+        status_bar = MagicMock()
+        win.statusBar = MagicMock(return_value=status_bar)
+        chart = MagicMock()
+        chart.sample_index_at_ratio.return_value = 5
+        chart.sample_at.return_value = [("V(out)", "V", [1.0])]
+        win._charts = [chart]
+        # act
+        win._on_pointer_moved(0, 0.2)
+        # assert
+        status_bar.showMessage.assert_called_once_with("time = 5.00 s    V(out) = 1.00 V")
+
+
+class TestMultiStepFft(TestCase):
+
+    def _make_fft_win(self, steps: int, step_points: int):
+        # build a bare MainWindow bypassing __init__
+        win = MainWindow.__new__(MainWindow)
+        win._abscissa = MagicMock(data=np.linspace(0.0, 1e-3, step_points), unit="s")
+        win._abscissa.name = "Time"
+        win._abscissa_from_index = 0
+        win._abscissa_to_index = step_points
+        win._steps = steps
+        win._qraw_path = MagicMock()
+        win._fft_windows = []
+        win._charts = []
+        win._abscissa_scale = MagicMock()
+        return win
+
+    def _make_dialog_mock(self, expr: Expression, step_points: int):
+        # build a FftDialog mock whose .exec() returns Accepted via a shared sentinel
+        _accepted = object()
+        dialog = MagicMock()
+        dialog.exec.return_value = _accepted
+        dialog.result_expressions = [expr]
+        dialog.result_from_index = 0
+        dialog.result_to_index = step_points
+        dialog.result_window = MagicMock(value="Rectangular")
+        dialog.result_zero_pad = MagicMock(value="None")
+        dialog.result_normalize = False
+        dialog.result_keep_dc = True
+        dialog.result_output = MagicMock()
+        # make the Dialog class itself (not instance) carry DialogCode
+        dialog_class = MagicMock()
+        dialog_class.return_value = dialog
+        dialog_class.DialogCode.Accepted = _accepted
+        return dialog_class
+
+    def test_fft_builds_expression_data_for_all_steps(self):
+        # arrange
+        steps = 3
+        step_points = 64
+        win = self._make_fft_win(steps, step_points)
+        # source expression: distinct value per step so we can verify which step was used
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {0, 1, 2}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        captured_qraw = []
+
+        def fake_qraw(**kw):
+            captured_qraw.append(kw)
+            return MagicMock()
+
+        def fake_main_window(qraw, source_qraw_path=None):
+            win2 = MagicMock()
+            win2._initial_selected_steps = None
+            return win2
+
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", fake_qraw), \
+             patch("viewer.main_window.MainWindow", fake_main_window), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager"):
+            freq = np.linspace(0, 500, 33)
+            mock_fft.return_value = (freq, np.ones((1, 33)))
+            win._on_menu_fft(0)
+        # assert — compute_fft_many called once per step
+        self.assertEqual(mock_fft.call_count, steps)
+
+    def test_fft_qraw_built_with_all_steps(self):
+        # arrange
+        steps = 3
+        step_points = 64
+        win = self._make_fft_win(steps, step_points)
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {1, 2}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        captured_steps = []
+
+        def fake_qraw(**kw):
+            captured_steps.append(kw.get("steps"))
+            return MagicMock()
+
+        def fake_main_window(qraw, source_qraw_path=None):
+            win2 = MagicMock()
+            win2._initial_selected_steps = None
+            return win2
+
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", fake_qraw), \
+             patch("viewer.main_window.MainWindow", fake_main_window), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager"):
+            freq = np.linspace(0, 500, 33)
+            mock_fft.return_value = (freq, np.ones((1, 33)))
+            win._on_menu_fft(0)
+        # assert — QRawFile receives steps=3 (all source steps, not just selected)
+        self.assertEqual(captured_steps[0], steps)
+
+    def test_fft_window_initial_selected_steps_matches_source_chart(self):
+        # arrange
+        steps = 5
+        step_points = 64
+        win = self._make_fft_win(steps, step_points)
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {1, 2}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        created_windows = []
+
+        def fake_main_window(qraw, source_qraw_path=None):
+            win2 = MagicMock()
+            win2._initial_selected_steps = None
+            created_windows.append(win2)
+            return win2
+
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
+             patch("viewer.main_window.MainWindow", fake_main_window), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager"):
+            freq = np.linspace(0, 500, 33)
+            mock_fft.return_value = (freq, np.ones((1, 33)))
+            win._on_menu_fft(0)
+        # assert — FFT window initial step selection matches source chart selected steps
+        self.assertEqual(created_windows[0]._initial_selected_steps, {1, 2})
+
+    def test_fft_expression_data_length_is_steps_times_freq_points(self):
+        # arrange
+        steps = 2
+        step_points = 64
+        freq_points = 33
+        win = self._make_fft_win(steps, step_points)
+        data = np.concatenate([np.full(step_points, float(s)) for s in range(steps)])
+        expr = Expression("V(out)", data, "V")
+        chart = MagicMock()
+        chart.expressions = [expr]
+        chart.abscissa = win._abscissa
+        chart.selected_steps = {0, 1}
+        win._charts = [chart]
+        dialog_class = self._make_dialog_mock(expr, step_points)
+        captured_expressions = []
+
+        def fake_expr_mgr(expressions):
+            captured_expressions.extend(expressions)
+            return MagicMock()
+
+        with patch("viewer.main_window.FftDialog", dialog_class), \
+             patch("viewer.main_window.QRawFile", return_value=MagicMock()), \
+             patch("viewer.main_window.MainWindow", return_value=MagicMock(_initial_selected_steps=None)), \
+             patch("viewer.main_window.compute_fft_many") as mock_fft, \
+             patch("viewer.main_window.ExpressionManager", fake_expr_mgr):
+            freq = np.linspace(0, 500, freq_points)
+            mock_fft.return_value = (freq, np.ones((1, freq_points)))
+            win._on_menu_fft(0)
+        # assert — FFT expression data length = steps * freq_points; abscissa = freq_points only
+        fft_expr = [e for e in captured_expressions if e.name != "Frequency"][0]
+        abscissa_expr = [e for e in captured_expressions if e.name == "Frequency"][0]
+        self.assertEqual(len(fft_expr.data), steps * freq_points)
+        self.assertEqual(len(abscissa_expr.data), freq_points)
+
+
+class TestComputeDecimateTarget(TestCase):
+
+    def test_returns_fallback_when_screen_is_none(self):
+        # arrange
+        screen = None
+        # act
+        result = _compute_decimate_target(screen)
+        # assert
+        self.assertEqual(result, _FALLBACK_DECIMATE_TARGET)
+
+    def test_uses_screen_width_and_pixel_ratio(self):
+        # arrange
+        screen = MagicMock()
+        screen.size.return_value.width.return_value = 2560
+        screen.devicePixelRatio.return_value = 2.0
+        # act
+        result = _compute_decimate_target(screen)
+        # assert
+        self.assertEqual(result, 2560 * 5)
+
+    def test_pixel_ratio_below_five_is_clamped_to_five(self):
+        # arrange
+        screen = MagicMock()
+        screen.size.return_value.width.return_value = 1920
+        screen.devicePixelRatio.return_value = 1.0
+        # act
+        result = _compute_decimate_target(screen)
+        # assert
+        self.assertEqual(result, 1920 * 5)
+
+    def test_high_pixel_ratio_is_used_directly(self):
+        # arrange
+        screen = MagicMock()
+        screen.size.return_value.width.return_value = 3840
+        screen.devicePixelRatio.return_value = 8.0
+        # act
+        result = _compute_decimate_target(screen)
+        # assert
+        self.assertEqual(result, 3840 * 8)
