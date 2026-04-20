@@ -426,55 +426,64 @@ Item {
         }
 
         function updateGraphsView(seriesToAdd, seriesToRemove) {
-            // loop series, multiple added in batch
-            for (var i = 0; i < seriesToAdd.length; i++) {
-                // current series in loop
-                const current = seriesToAdd[i];
-                // series name & data
-                const name = current[0];
-                const color = current[1];
-                const data = current[2];
-                // loop series lines
-                for (var j = 0; j < data.length; j++) {
-                    // series
-                    const series = data[j];
-                    // set line color from the palette
-                    series.color = color;
-                    // append to chart
-                    graphsView.addSeries(series);
-                }
-                // append legend entry with the same color (if defined, appending a step in a series will use existing legend)
-                if (name != null)
-                    legendModel.append({ seriesName: name, seriesColor: color });
-            }
-            // loop series to remove
+            // skip when there are no updates
+            if (seriesToAdd.length === 0 && seriesToRemove.length === 0)
+                return;
+            // avoid repeated repaints while many series are updated in one event
+            const wasVisible = graphsView.visible;
+            if (wasVisible)
+                graphsView.visible = false;
+            // collect removals first so transient add/remove overlap does not churn scenegraph state
+            const removeLegendNames = {};
             for (var i = 0; i < seriesToRemove.length; i++) {
-                // current
-                const current = seriesToRemove[i];
-                // series name & data
-                const name = current[0];
-                const data = current[1];
-                // loop series lines
-                for (var j = data.length - 1; j >= 0; j--) {
-                    // series
-                    const series = data[j];
-                    // remove from chart
-                    graphsView.removeSeries(series);
-                }
-                // check we need to process legend removal, removing steps from series should not remove the legend entry until all steps are removed
-                if (name !== null) {
-                    // loop legend entries
-                    for (var j = legendModel.count - 1; j >= 0; j--) {
-                        // compare name to find the matching legend entry to remove
-                        if (legendModel.get(j)["seriesName"] === name) {
-                            // remove legend entry with matching name
-                            legendModel.remove(j);
-                            // exit loop
-                            break;
-                        }
-                    }
-                }
+                // current remove payload
+                const removeCurrent = seriesToRemove[i];
+                // extract name and series list
+                const removeName = removeCurrent[0];
+                const removeData = removeCurrent[1];
+                // remove every series in this payload
+                for (var j = removeData.length - 1; j >= 0; j--)
+                    graphsView.removeSeries(removeData[j]);
+                // mark legend entries to remove in a single legend scan later
+                if (removeName != null)
+                    removeLegendNames[removeName] = true;
             }
+            // remove legend entries in one reverse pass
+            for (var i = legendModel.count - 1; i >= 0; i--) {
+                // current legend label
+                const legendName = legendModel.get(i)["seriesName"];
+                // remove when this label was marked for deletion
+                if (removeLegendNames[legendName] === true)
+                    legendModel.remove(i);
+            }
+            // collect additions after removals to minimize intermediate graph states
+            const legendEntriesToAdd = [];
+            for (var i = 0; i < seriesToAdd.length; i++) {
+                // current add payload
+                const addCurrent = seriesToAdd[i];
+                // extract name, color and series list
+                const addName = addCurrent[0];
+                const addColor = addCurrent[1];
+                const addData = addCurrent[2];
+                // add every series for this payload
+                for (var j = 0; j < addData.length; j++) {
+                    // current series
+                    const addSeries = addData[j];
+                    // set line color from the palette
+                    addSeries.color = addColor;
+                    // append to chart
+                    graphsView.addSeries(addSeries);
+                }
+                // queue legend addition with same color; step additions continue using existing legend entries
+                if (addName != null)
+                    legendEntriesToAdd.push({ seriesName: addName, seriesColor: addColor });
+            }
+            // append legend entries in one pass
+            for (var i = 0; i < legendEntriesToAdd.length; i++)
+                legendModel.append(legendEntriesToAdd[i]);
+            // restore visibility after batch updates
+            if (wasVisible)
+                graphsView.visible = true;
             // reveal the legend the first time we plot series
             if (!panel.legendVisible) {
                 // reveal the legend after a short delay so the chart has time to paint first
