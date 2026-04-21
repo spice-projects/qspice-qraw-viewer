@@ -93,62 +93,6 @@ def _format_values(name: str, values: list[float], unit: str) -> str:
     return f"{name} = [{formatted_values}]"
 
 
-class StepCombination:
-
-    def __init__(self, step_index: int, values: list[str]):
-        # fields
-        self._step_index = step_index
-        self._values = values
-
-    @property
-    def step_index(self) -> int:
-        return self._step_index
-
-    @property
-    def values(self) -> list[str]:
-        return self._values
-
-
-def _format_parameter_value(value: object) -> str:
-    # unpack numpy scalar to built-in scalar when needed
-    if isinstance(value, np.generic):
-        value = value.item()
-    # use compact formatting for floating-point values
-    if isinstance(value, float):
-        return f"{value:.12g}"
-    # fallback string conversion
-    return str(value)
-
-
-def _build_step_combinations(expressions: list[Expression], steps: int, step_points: int) -> tuple[list[str], list[StepCombination]]:
-    # only process parameter combinations when there are multiple steps
-    if steps <= 1:
-        return [], []
-    # parameter expressions from the source QRAW variable list
-    parameter_expressions = [expression for expression in expressions if expression.variable_type == "parameter"]
-    # no parameters swept: return empty
-    if len(parameter_expressions) == 0:
-        return [], []
-    # parameter names for dialog columns
-    parameter_names = [expression.name for expression in parameter_expressions]
-    # all step combinations in original simulation order
-    combinations: list[StepCombination] = []
-    # loop steps
-    for step_index in range(steps):
-        # row values for the current step
-        values: list[str] = []
-        # loop parameter expressions
-        for expression in parameter_expressions:
-            # first value for this step in the flattened expression vector
-            value_index = min(step_index * step_points, len(expression.data) - 1)
-            # append formatted value
-            values.append(_format_parameter_value(expression.data[value_index]))
-        # append combination
-        combinations.append(StepCombination(step_index, values))
-    # exit
-    return parameter_names, combinations
-
-
 _FALLBACK_DECIMATE_TARGET = 9600
 
 
@@ -175,21 +119,10 @@ class MainWindow(QMainWindow):
         self._abscissa = qraw_file.abscissa
         self._abscissa_scale = qraw_file.abscissa_scale
         self._expression_manager = qraw_file.expression_manager
+        self._step_information = qraw_file.step_information
         # normalize numpy scalar to built-in int for stable Qt property marshalling
-        self._steps = int(qraw_file.steps)
         self._plot_suggestions = [] if start_empty else qraw_file.get_plot_suggestions()
-        # check if we have multiple steps and if so, precompute the step parameter combinations for the step tool dialog; this is done here once to avoid redundant work in the dialog when the user opens it multiple times, and also to keep the dialog code simpler and focused on UI logic rather than data processing
-        if self._steps > 1:
-            # qraw_file already trims the abscissa to a single step period
-            step_points = len(self._abscissa.data)
-            # build step parameter names and combinations for the step tool dialog; these are precomputed here to avoid redundant work in the dialog when the user opens it multiple times
-            self._step_parameter_names, self._step_combinations = _build_step_combinations(self._expression_manager.expressions, self._steps, step_points)
-        else:
-            self._step_parameter_names = []
-            self._step_combinations = []
-        # store the simulation file path for use by the Jupyter integration;
-        # source_qraw_path overrides when this window displays a derived result (e.g. FFT)
-        # so Jupyter always opens the original .qraw file
+        # store the simulation file path for use by the Jupyter integration
         self._qraw_path = source_qraw_path if source_qraw_path is not None else qraw_file.filename
         # set window title to include the loaded filename
         self.setWindowTitle(f"{self._default_chart_type} - {qraw_file.filename.name}")
@@ -197,14 +130,13 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(f"QMainWindow {{ background: {_BG}; }}")
         # initialize data structures
         self._charts: list[Chart] = []
-        # optional initial step selection applied when charts are first created (used by FFT windows to
-        # pre-focus on the same steps the user was viewing in the source chart)
+        # optional initial step selection applied when charts are first created (used by FFT windows to pre-focus on the same steps the user was viewing in the source chart)
         self._initial_selected_steps: set[int] | None = None
         # keep Jupyter windows alive to prevent garbage collection
         self._jupyter_windows: list[JupyterWindow] = []
         # default horizontal zoom
-        self._abscissa_from_index = 0
-        self._abscissa_to_index = len(self._abscissa.data)
+        self._abscissa_from_index = self._step_information.abscissa_from_index
+        self._abscissa_to_index = self._step_information.abscissa_to_index
         # single QQuickView hosts the entire multi-chart scene — one Metal swap chain
         self._qml_view = QQuickView()
         self._qml_view.statusChanged.connect(self._on_qml_ready)
@@ -241,7 +173,7 @@ class MainWindow(QMainWindow):
         self._root = self._qml_view.rootObject()
         # set window-level menu capability flags using built-in bool to avoid passing numpy.bool_ into QML properties
         self._root.setProperty("fftEnabled", bool(self._abscissa.unit == "s"))
-        self._root.setProperty("stepToolEnabled", bool(self._steps > 1))
+        self._root.setProperty("stepToolEnabled", bool(self._step_information.length > 1))
         # connect signals from QML to Python handlers
         self._root.horizontalZoom.connect(self._on_horizontal_zoom)
         self._root.verticalZoom.connect(self._on_vertical_zoom)
@@ -341,7 +273,7 @@ class MainWindow(QMainWindow):
         # get a reference to the chart's QML object so we can manipulate it
         chart_root = self._root.getChart(chart_index)
         # create chart instance
-        chart = Chart(chart_root, chart_type, self._expression_manager, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self._steps, self._decimate_target)
+        chart = Chart(chart_root, chart_type, self._expression_manager, self._abscissa, self._abscissa_from_index, self._abscissa_to_index, self._step_information, self._decimate_target)
         # apply initial step selection when provided (e.g. FFT window inheriting source chart visibility)
         if self._initial_selected_steps is not None:
             chart.selected_steps = self._initial_selected_steps
@@ -410,8 +342,8 @@ class MainWindow(QMainWindow):
         # log information
         logger.debug("User requested zoom to fit on chart at index: %d", chart_index)
         # reset horizontal axis indices to show the full range of the abscissa
-        self._abscissa_from_index = 0
-        self._abscissa_to_index = len(self._abscissa.data)
+        self._abscissa_from_index = self._step_information.abscissa_from_index
+        self._abscissa_to_index = self._step_information.abscissa_to_index
         # update charts
         for index, chart in enumerate(self._charts):
             # check if this is the chart that triggered the zoom to fit action
@@ -437,8 +369,8 @@ class MainWindow(QMainWindow):
         # log information
         logger.debug("User requested zoom abscissa extent on chart at index: %d", chart_index)
         # update fields
-        self._abscissa_from_index = 0
-        self._abscissa_to_index = len(self._abscissa.data)
+        self._abscissa_from_index = self._step_information.abscissa_from_index
+        self._abscissa_to_index = self._step_information.abscissa_to_index
         # update charts
         for chart in self._charts:
             # update zoom window
@@ -502,13 +434,12 @@ class MainWindow(QMainWindow):
         # check the chart index is valid
         if chart_index < 0 or chart_index >= len(self._charts):
             return
-        # dialog rows built from precomputed parameter combinations
-        step_rows = [{"stepIndex": combination.step_index, "values": combination.values} for combination in self._step_combinations]
-        # get selected steps for this chart
+        # current chart
         chart = self._charts[chart_index]
-        selected_steps = sorted(chart.selected_steps)
+        # get selected steps for this chart, make a copy
+        selected_steps = set(chart.selected_steps)
         # open step tool dialog
-        dialog = StepToolDialog(self._step_parameter_names, step_rows, selected_steps, self)
+        dialog = StepToolDialog(self, self._step_information, selected_steps)
         # exit if the user canceled
         if dialog.exec() != StepToolDialog.DialogCode.Accepted:
             return

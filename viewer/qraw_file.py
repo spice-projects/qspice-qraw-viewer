@@ -58,15 +58,59 @@ class PlotSuggestion:
     @property
     def expressions(self) -> list[Expression]:
         return self._expressions
+    
+
+class StepInformation:
+
+    def __init__(self, keys: list[str], values: list[tuple], abscissa_indices: list[slice]):
+        # fields
+        self._keys = keys
+        self._values = values
+        self._abscissa_indices = abscissa_indices
+        # calculated values for quick lookup
+        self._step_count = len(abscissa_indices)
+        self._abscissa_from_index = 0
+        self._abscissa_to_index = np.min([step_indices.stop - step_indices.start for step_indices in self._abscissa_indices])
+
+    @property
+    def keys(self) -> list[str]:
+        return self._keys
+    
+    @property
+    def values(self) -> list[tuple]:
+        return self._values
+
+    @property
+    def abscissa_indices(self) -> list[slice]:
+        return self._abscissa_indices
+
+    @property
+    def length(self) -> int:
+        return self._step_count
+
+    @property
+    def abscissa_from_index(self) -> int:
+        return self._abscissa_from_index
+    
+    @property
+    def abscissa_to_index(self) -> int:
+        return self._abscissa_to_index
 
 
-def _process_step(abscissa: Expression, num_points: int) -> tuple[int, Expression]:
-    # calculate the period, O(n) at C speed
-    period = np.argmax(np.isclose(abscissa.data[1:], abscissa.data[0], rtol=1e-6)) + 1
-    # calculate the number of steps and points per step based on the period
-    steps = num_points // period
-    # number of steps and points per step
-    return steps, Expression(abscissa.name, abscissa.data[:period], abscissa.unit, abscissa.source, abscissa.variable_type)
+def _process_steps(expressions: list[Expression], num_points: int) -> StepInformation:
+    # stack all parameter values into a matrix (num_points, num_parameters)
+    stacked = np.column_stack([expr.data for expr in expressions])
+    # detect changes in parameter values (N - 1, )
+    changed = np.any(stacked[1:] != stacked[:-1], axis=1)
+    # boundaries
+    boundaries = np.flatnonzero(changed) + 1
+    # start and end indices of each step
+    starts = np.concatenate(([0], boundaries))
+    ends = np.concatenate((boundaries, [num_points]))
+    # parameter values at the start of each step
+    values = [tuple(stacked[s].tolist()) for s in starts]
+    # create step information object
+    return StepInformation(keys=[expr.name for expr in expressions], values=values, abscissa_indices=[slice(int(s), int(e)) for s, e in zip(starts, ends)])
 
 
 def _process_scale(abscissa: Expression, scale: AbscissaScale) -> Expression:
@@ -93,14 +137,14 @@ _MODE_TO_CHART: dict[str, str] = {
 
 class QRawFile:
 
-    def __init__(self, filename: Path, title: str, date: str, plotname: str, complex: bool, steps: int, abscissa: Expression, abscissa_scale: AbscissaScale, command: str, plot_suggestion: str, expression_manager: ExpressionManager, _mmap: mmap.mmap | None = None, chart_type: str | None = None):
+    def __init__(self, filename: Path, title: str, date: str, plotname: str, complex: bool, step_information: StepInformation, abscissa: Expression, abscissa_scale: AbscissaScale, command: str, plot_suggestion: str, expression_manager: ExpressionManager, _mmap: mmap.mmap | None = None, chart_type: str | None = None):
         # fields
         self._filename = filename
         self._title = title
         self._date = date
         self._plotname = plotname
         self._complex = complex
-        self._steps = steps
+        self._step_information = step_information
         self._abscissa = abscissa
         self._abscissa_scale = abscissa_scale
         self._command = command
@@ -135,8 +179,8 @@ class QRawFile:
         return self._complex
 
     @property
-    def steps(self) -> int:
-        return self._steps
+    def step_information(self) -> StepInformation:
+        return self._step_information
 
     @property
     def abscissa(self) -> Expression:
@@ -337,12 +381,12 @@ class QRawFile:
                     except Exception as ex:
                         # log error but continue processing other aliasses
                         logger.error("Failed to evaluate expression '%s': %s", alias_name, ex)
-            # step information
-            steps, abscissa = _process_step(variables[0], num_points) if stepped else (1, variables[0])
+            # process steps in stepped files
+            step_information = _process_steps([expr for expr in variables if expr.variable_type == "parameter"], num_points) if stepped else StepInformation(keys=[], values=[], indices=[slice(0, num_points)])
             # process scale (x axis)
-            abscissa = _process_scale(abscissa, abscissa_scale)
+            abscissa = _process_scale(variables[0], abscissa_scale)
             # create QRawFile instance with parsed header, variables, and binary data; pass the mmap so it stays alive for the lifetime of the QRawFile — Variable arrays are views into it
-            return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, steps=steps, abscissa=abscissa, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), expression_manager=expression_manager, _mmap=data)
+            return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, step_information=step_information, abscissa=abscissa, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), expression_manager=expression_manager, _mmap=data)
         finally:
             # log information
             logger.info("Finished loading QRAW file: %s, latency: %f seconds", path, time.perf_counter() - start_time)

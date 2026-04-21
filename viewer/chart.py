@@ -8,6 +8,7 @@ from PySide6.QtQuick import QQuickItem
 from .decimation_algorithm import DecimationAlgorithm, decimate_xy
 from .expression import Expression
 from .expression_manager import ExpressionManager
+from .qraw_file import StepInformation
 
 logger = logging.getLogger(__name__)
 
@@ -17,19 +18,25 @@ _DECIMATION_ALGORITHM = DecimationAlgorithm.M4
 # series colors
 _SERIES_COLOR_PALETTE = [
     "#f77f00",  # orange
+    "#3a86ff",  # blue
+    "#ffdd00",  # yellow
+    "#9b5de5",  # indigo
     "#00b4d8",  # cyan
+    "#ff8fa3",  # pink
     "#80ff72",  # green
     "#e040fb",  # purple
-    "#ffdd00",  # yellow
     "#ff4365",  # red
     "#00f5d4",  # teal
+    "#f4a261",  # apricot
+    "#8ac926",  # lime
+    "#4cc9f0",  # sky cyan
     "#bbdefb"   # pale blue
 ]
 
 
 class Chart:
 
-    def __init__(self, component: QQuickItem, char_type: str, expression_manager: ExpressionManager, abscissa: Expression, abscissa_from_index: int, abscissa_to_index: int, steps: int, decimate_target: int):
+    def __init__(self, component: QQuickItem, char_type: str, expression_manager: ExpressionManager, abscissa: Expression, abscissa_from_index: int, abscissa_to_index: int, step_information: StepInformation, decimate_target: int):
         # store component
         self._component = component
         # store chart type
@@ -41,15 +48,12 @@ class Chart:
         # current zoom window (x: in abscissa index, y: in ordinate percentages)
         self._zoom_window = (abscissa_from_index, 0.0, abscissa_to_index, 1.0)
         # steps
-        self._steps = steps
-        self._step_points = len(abscissa.data)
-        self._selected_steps: set[int] = set(range(self._steps))
+        self._step_information = step_information
+        self._selected_steps: set[int] = set(range(self._step_information.length))
         # store decimation target for later use when adding series
         self._decimate_target = decimate_target
         # track active series
         self._series: dict[str, tuple[Expression, dict[Expression, tuple[QAbstractAxis, dict[int, QLineSeries], float, float, str]]]] = {}
-        # decimated sample cache used by status-bar probing: {ordinate_variant: {step: (x_np, y_np)}}
-        self._sample_cache: dict[Expression, dict[int, tuple[np.ndarray, np.ndarray]]] = {}
         # axis tracking for measurement types, e.g. {"V": <QAbstractAxis>, "I": <QAbstractAxis>}
         self._y_axes: dict[str, QAbstractAxis] = {}
         self._y_axes_ref_counts: dict[QAbstractAxis, int] = {}
@@ -86,9 +90,11 @@ class Chart:
         self.plot_series(self.expressions)
 
     def render(self, abscissa_label: str, abscissa_scale: str, initial_expressions: set[Expression]):
-        # x0 and x1
-        abscissa_left_value = float(self._abscissa.data[self._zoom_window[0]])
-        abscissa_right_value = float(self._abscissa.data[self._zoom_window[2] - 1])
+        # abscissa data for the first step
+        abscissa_data = self._abscissa.data[self._step_information.abscissa_indices[0]]
+        # x0 and x1 (from first step)
+        abscissa_left_value = float(abscissa_data[self._zoom_window[0]])
+        abscissa_right_value = float(abscissa_data[self._zoom_window[2] - 1])
         # initialize chart component
         self._component.initialize(abscissa_label, self._abscissa.unit, abscissa_scale, abscissa_left_value, abscissa_right_value)
         # render all expressions as series
@@ -97,8 +103,6 @@ class Chart:
         self.auto_range()
 
     def plot_series(self, expressions: set[Expression]):
-        # apply zoom window to abscissa — shared across all ordinate steps, will be paired with y below
-        abscissa_values = self._abscissa.data[self._zoom_window[0]:self._zoom_window[2]]
         # series to render and remove from the chart
         series_to_render: list[tuple[str, str, list[QLineSeries]]] = []
         series_to_remove: list[tuple[str | None, list[QLineSeries]]] = []
@@ -117,8 +121,6 @@ class Chart:
                     # release axis if no longer in use
                     if self._release_y_axis(axis):
                         axes_to_remove.append(axis)
-                    # clear decimated sample cache for this plotted variant
-                    self._sample_cache.pop(ordinate_variant, None)
                     # append to list for later removal from chart
                     series_to_remove.append([ordinate_variant.name, list(rendered_series.values())])
                 # remove from tracked series so we don't try to update it later
@@ -142,10 +144,6 @@ class Chart:
                         series_to_remove.append([None, [rendered_series[step]]])
                         # remove from dictionary so we don't try to update it later
                         del rendered_series[step]
-                        # check decimated sample cache exists for this plotted variant
-                        if ordinate_variant in self._sample_cache:
-                            # remove cached points for this step
-                            self._sample_cache[ordinate_variant].pop(step, None)
                 # check we need to generate a color for this expression
                 if color is None:
                     # assign next color in palette
@@ -168,15 +166,22 @@ class Chart:
                     # check step is already rendered
                     if step in rendered_series:
                         continue
+                    # step slice
+                    step_slice = self._step_information.abscissa_indices[step]
+                    # apply zoom window to abscissa
+                    abscissa_values = self._abscissa.data[step_slice][self._zoom_window[0]:self._zoom_window[2]]
                     # ordinate variant values for this step (as contiguous array in memory), apply zoom window
-                    ordinate_values = ordinate_variant.data[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
+                    ordinate_values = ordinate_variant.data[step_slice][self._zoom_window[0]:self._zoom_window[2]]
                     # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
                     x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
-                    # remove NaN, Inf and -Inf values which can cause issues for chart when plotting
-                    finite_mask = np.isfinite(y_np)
-                    # update x and y with finite values only
-                    x_np = x_np[finite_mask]
-                    y_np = y_np[finite_mask]
+                    # remove Inf values
+                    inf_mask = np.isinf(y_np)
+                    if inf_mask.any():
+                        # mask for finite values
+                        keep_mask = ~inf_mask
+                        # update x and y with finite values only
+                        x_np = x_np[keep_mask]
+                        y_np = y_np[keep_mask]
                     # check all values were non-finite after filtering
                     if x_np.size == 0 or y_np.size == 0:
                         continue
@@ -193,8 +198,6 @@ class Chart:
                         series.setDashPattern([3, step + 1])
                     # append to lists
                     rendered_series[step] = series
-                    # cache decimated points used by the rendered series for status probing
-                    self._sample_cache.setdefault(ordinate_variant, {})[step] = (x_np, y_np)
                     # append to list for later addition to chart
                     ordinate_series_to_render.append(series)
                     # update min and max values
@@ -301,7 +304,6 @@ class Chart:
         old_y_axes = self._y_axes
         # reset internal state
         self._series = {}
-        self._sample_cache = {}
         self._y_axes = {}
         self._y_axes_ref_counts = {}
         # reset color index for new series
@@ -343,23 +345,12 @@ class Chart:
             for ordinate_variant, (_, rendered_series, _, _, _) in ordinate_series.items():
                 # values (per step)
                 values: list[float] = []
-                # step and series for this step
-                for step, _ in rendered_series.items():
-                    # check decimated points are available for this visible step
-                    sample_points = self._sample_cache.get(ordinate_variant, {}).get(step)
-                    if sample_points is not None:
-                        # decimated x and y arrays for the rendered step
-                        x_np, y_np = sample_points
-                        # check decimated arrays are not empty
-                        if x_np.size > 0 and y_np.size > 0:
-                            # nearest rendered sample index in x-space
-                            nearest_index = int(np.argmin(np.abs(x_np - target_x)))
-                            # append rendered y value at nearest x
-                            values.append(float(y_np[nearest_index]))
-                            # next rendered step
-                            continue
-                    # fallback to raw value at nearest original sample index
-                    values.append(float(ordinate_variant.data[step * self._step_points + idx]))
+                # # step and series for this step
+                # for step, _ in rendered_series.items():
+                #     # step slice
+                #     step_slice = self._step_information.abscissa_indices[step]
+                #     # fallback to raw value at nearest original sample index (this is not correct, idx is for decimated points)
+                #     values.append(float(ordinate_variant.data[step_slice][idx]))
                 # append to result (name, unit, value)
                 result.append((ordinate_variant.name, ordinate_variant.unit, values))
         # exit
@@ -449,11 +440,9 @@ class Chart:
         return []
 
     def _redraw_all_series(self):
-        # abscissa values — shared across all ordinate steps, will be paired with y below
-        abscissa_values = self._abscissa.data[self._zoom_window[0]:self._zoom_window[2]]
         # x0 and x1
-        abscissa_min = float(abscissa_values[0])
-        abscissa_max = float(abscissa_values[-1])
+        abscissa_left_value: float | None = None
+        abscissa_right_value: float | None = None
         try:
             # loop existing series
             for _, (_, ordinate_series) in self._series.items():
@@ -464,22 +453,43 @@ class Chart:
                     max_value = float("-inf")
                     # loop steps
                     for step, series in rendered_series.items():
-                        # ordinate variant values for this step
-                        ordinate_values = ordinate_variant.data[step * self._step_points: (step + 1) * self._step_points][self._zoom_window[0]:self._zoom_window[2]]
+                        # step slice
+                        step_slice = self._step_information.abscissa_indices[step]
+                        # abscissa values
+                        abscissa_values = self._abscissa.data[step_slice][self._zoom_window[0]:self._zoom_window[2]]
+                        # ordinate variant values for this step & zoom window
+                        ordinate_values = ordinate_variant.data[step_slice][self._zoom_window[0]:self._zoom_window[2]]
                         # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
                         x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
-                        # remove NaN, Inf and -Inf values which can cause issues for chart when plotting
-                        finite_mask = np.isfinite(y_np)
-                        # update x and y with finite values only
-                        x_np = x_np[finite_mask]
-                        y_np = y_np[finite_mask]
+                        # remove Inf values
+                        inf_mask = np.isinf(y_np)
+                        if inf_mask.any():
+                            # mask for finite values
+                            keep_mask = ~inf_mask
+                            # update x and y with finite values only
+                            x_np = x_np[keep_mask]
+                            y_np = y_np[keep_mask]
+                        # check all values were non-finite after filtering
+                        if x_np.size == 0 or y_np.size == 0:
+                            continue
                         # update series with decimated data
                         series.replaceNp(x_np, y_np)
-                        # cache decimated points used by the rendered series for status probing
-                        self._sample_cache.setdefault(ordinate_variant, {})[step] = (x_np, y_np)
                         # update min and max values
                         min_value = min(min_value, float(np.min(y_np)))
                         max_value = max(max_value, float(np.max(y_np)))
+                        # update x axis left and right values based on the new zoom window
+                        if abscissa_left_value is None or abscissa_right_value is None:
+                            # initialize values for the first series processed
+                            abscissa_left_value = float(abscissa_values[0])
+                            abscissa_right_value = float(abscissa_values[-1])
+                        elif abscissa_left_value < abscissa_right_value:
+                            # ascending abscissa, update left and right values as needed
+                            abscissa_left_value = min(abscissa_left_value, float(abscissa_values[0]))
+                            abscissa_right_value = max(abscissa_right_value, float(abscissa_values[-1]))
+                        else:
+                            # descending abscissa, update left and right values as needed
+                            abscissa_left_value = max(abscissa_left_value, float(abscissa_values[0]))
+                            abscissa_right_value = min(abscissa_right_value, float(abscissa_values[-1]))
                     # calculate scale for Y axis
                     scale = max(abs(max_value), abs(min_value))
                     # Y axis range
@@ -492,7 +502,8 @@ class Chart:
                     ordinate_series[ordinate_variant] = (y_axis, rendered_series, min_value - delta, max_value + delta, color)
         finally:
             # resize abscissa axis
-            self._component.resizeAbscissa(abscissa_min, abscissa_max)
+            if abscissa_left_value is not None and abscissa_right_value is not None:
+                self._component.resizeAbscissa(abscissa_left_value, abscissa_right_value)
 
     def _get_y_axis(self, unit: str) -> QAbstractAxis | None:
         # existing axis for measurement type

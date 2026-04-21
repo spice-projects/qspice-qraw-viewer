@@ -75,7 +75,7 @@ def _make_notebook(qraw_path: Path) -> dict:
                     "\n",
                     "print(f'File   : {qraw.filename.name}')\n",
                     "print(f'Type   : {qraw.plotname}')\n",
-                    "print(f'Steps  : {qraw.steps}')\n",
+                    "print(f'Steps  : {qraw.step_information}')\n",
                     "print(f'X-axis : {qraw.abscissa.name} ({qraw.abscissa.unit}), {len(qraw.abscissa.data)} points')",
                 ],
             },

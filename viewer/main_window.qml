@@ -230,7 +230,7 @@ Item {
             // perform a horizontal zoom around a normalized centre point
             // `center` must be in [0,1] and represents the x-position of the
             // mouse cursor (or any other pivot) expressed as a fraction of the
-            // current visible range.  `factor` is the scale factor applied to
+            // current visible range. `factor` is the scale factor applied to
             // the window width (<1 zooms in, >1 zooms out).  This routine
             // computes the new [left,right] ratios such that the value at
             // `center` remains fixed on the screen, mimicking the behaviour of
@@ -244,7 +244,6 @@ Item {
                 if (xr1 < 0) {
                     xr1 = 0;
                 }
-
                 panel.horizontalZoom(xr1, xr2, factor);
             }
 
