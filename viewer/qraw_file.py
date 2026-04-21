@@ -58,7 +58,7 @@ class PlotSuggestion:
     @property
     def expressions(self) -> list[Expression]:
         return self._expressions
-    
+
 
 class StepInformation:
 
@@ -69,13 +69,14 @@ class StepInformation:
         self._abscissa_indices = abscissa_indices
         # calculated values for quick lookup
         self._step_count = len(abscissa_indices)
+        self._step_lengths = [step_indices.stop - step_indices.start for step_indices in self._abscissa_indices]
         self._abscissa_from_index = 0
-        self._abscissa_to_index = np.min([step_indices.stop - step_indices.start for step_indices in self._abscissa_indices])
+        self._abscissa_to_index = int(max(self._step_lengths, default=0))
 
     @property
     def keys(self) -> list[str]:
         return self._keys
-    
+
     @property
     def values(self) -> list[tuple]:
         return self._values
@@ -91,10 +92,13 @@ class StepInformation:
     @property
     def abscissa_from_index(self) -> int:
         return self._abscissa_from_index
-    
+
     @property
     def abscissa_to_index(self) -> int:
         return self._abscissa_to_index
+
+    def step_length(self, step_index: int) -> int:
+        return self._step_lengths[step_index]
 
 
 def _process_steps(expressions: list[Expression], num_points: int) -> StepInformation:
@@ -181,6 +185,13 @@ class QRawFile:
     @property
     def step_information(self) -> StepInformation:
         return self._step_information
+
+    @property
+    def steps(self) -> int:
+        return self._step_information.length
+
+    def step_length(self, step_index: int) -> int:
+        return self._step_information.step_length(step_index)
 
     @property
     def abscissa(self) -> Expression:
@@ -382,7 +393,7 @@ class QRawFile:
                         # log error but continue processing other aliasses
                         logger.error("Failed to evaluate expression '%s': %s", alias_name, ex)
             # process steps in stepped files
-            step_information = _process_steps([expr for expr in variables if expr.variable_type == "parameter"], num_points) if stepped else StepInformation(keys=[], values=[], indices=[slice(0, num_points)])
+            step_information = _process_steps([expr for expr in variables if expr.variable_type == "parameter"], num_points) if stepped else StepInformation(keys=[], values=[tuple()], abscissa_indices=[slice(0, num_points)])
             # process scale (x axis)
             abscissa = _process_scale(variables[0], abscissa_scale)
             # create QRawFile instance with parsed header, variables, and binary data; pass the mmap so it stays alive for the lifetime of the QRawFile — Variable arrays are views into it

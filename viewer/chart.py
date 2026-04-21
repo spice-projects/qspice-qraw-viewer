@@ -91,10 +91,14 @@ class Chart:
 
     def render(self, abscissa_label: str, abscissa_scale: str, initial_expressions: set[Expression]):
         # abscissa data for the first step
-        abscissa_data = self._abscissa.data[self._step_information.abscissa_indices[0]]
+        first_step_slice = self._step_information.abscissa_indices[0]
+        # local zoom bounds for the first step
+        first_from_index, first_to_index = self._get_step_zoom_bounds(0)
+        # abscissa data for the first step and local zoom range
+        abscissa_data = self._abscissa.data[first_step_slice.start + first_from_index:first_step_slice.start + first_to_index]
         # x0 and x1 (from first step)
-        abscissa_left_value = float(abscissa_data[self._zoom_window[0]])
-        abscissa_right_value = float(abscissa_data[self._zoom_window[2] - 1])
+        abscissa_left_value = float(abscissa_data[0])
+        abscissa_right_value = float(abscissa_data[-1])
         # initialize chart component
         self._component.initialize(abscissa_label, self._abscissa.unit, abscissa_scale, abscissa_left_value, abscissa_right_value)
         # render all expressions as series
@@ -168,10 +172,15 @@ class Chart:
                         continue
                     # step slice
                     step_slice = self._step_information.abscissa_indices[step]
+                    # local zoom bounds for this step
+                    zoom_from_index, zoom_to_index = self._get_step_zoom_bounds(step)
                     # apply zoom window to abscissa
-                    abscissa_values = self._abscissa.data[step_slice][self._zoom_window[0]:self._zoom_window[2]]
+                    abscissa_values = self._abscissa.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
                     # ordinate variant values for this step (as contiguous array in memory), apply zoom window
-                    ordinate_values = ordinate_variant.data[step_slice][self._zoom_window[0]:self._zoom_window[2]]
+                    ordinate_values = ordinate_variant.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
+                    # skip inconsistent slices to protect decimation input contracts
+                    if abscissa_values.size == 0 or ordinate_values.size == 0 or abscissa_values.size != ordinate_values.size:
+                        continue
                     # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
                     x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
                     # remove Inf values
@@ -328,15 +337,15 @@ class Chart:
         x_ratio = max(0.0, min(1.0, x_ratio))
         # current horizontal zoom bounds
         from_index, to_index = self.zoom_abscissa_bounds()
-        # visible abscissa window
-        window = self._abscissa.data[from_index:to_index]
+        # reference step for x mapping, using the first selected step when available
+        reference_step = min(self._selected_steps) if self._selected_steps else 0
+        # reference step slice
+        reference_slice = self._step_information.abscissa_indices[reference_step]
+        # visible abscissa window for the reference step
+        window = self._abscissa.data[reference_slice.start + from_index:reference_slice.start + to_index]
         # check visible window is empty
         if window.size == 0:
             return []
-        # target abscissa value under the cursor in the visible window
-        target_x = float(window[0] + x_ratio * (window[-1] - window[0]))
-        # compute the nearest sample index within the current zoom window
-        idx = self.sample_index_at_ratio(x_ratio)
         # collect one (name, unit, value) tuple per plotted variant (magnitude/phase counted separately)
         result: list[tuple[str, str, list[float]]] = []
         # loop series
@@ -360,9 +369,28 @@ class Chart:
         # current abscissa bounds in sample indexes
         return self._zoom_window[0], self._zoom_window[2]
 
+    def _get_step_zoom_bounds(self, step: int) -> tuple[int, int]:
+        # step length for this step
+        step_length = self._step_information.step_length(step)
+        # keep at least two points when possible for stable zoom and FFT windows
+        if step_length <= 1:
+            return 0, step_length
+        # clamp zoom start to step bounds
+        from_index = max(0, min(self._zoom_window[0], step_length - 2))
+        # clamp zoom end to step bounds and enforce a minimum window size of two points
+        to_index = max(from_index + 2, min(self._zoom_window[2], step_length))
+        # return local bounds
+        return from_index, to_index
+
     def sample_index_at_ratio(self, x_ratio: float) -> int:
         # x zoom window indexes
         from_index, to_index = self.zoom_abscissa_bounds()
+        # reference step for x mapping, using the first selected step when available
+        reference_step = min(self._selected_steps) if self._selected_steps else 0
+        # clamp bounds to the reference step
+        from_index, to_index = self._get_step_zoom_bounds(reference_step)
+        # reference slice
+        reference_slice = self._step_information.abscissa_indices[reference_step]
         # clamp ratio to visible horizontal span
         x_ratio = max(0.0, min(1.0, x_ratio))
         # window length
@@ -372,7 +400,7 @@ class Chart:
             # return only sample index in window
             return from_index
         # visible abscissa window which can be non-uniformly spaced
-        window = self._abscissa.data[from_index:to_index]
+        window = self._abscissa.data[reference_slice.start + from_index:reference_slice.start + to_index]
         # target x value on the visible axis for the given cursor ratio
         target = float(window[0] + x_ratio * (window[-1] - window[0]))
         # check ascending abscissa ordering
@@ -418,6 +446,16 @@ class Chart:
         # select the closest index and break ties to the left
         return from_index + (left_idx if left_dist <= right_dist else right_idx)
 
+    def sample_abscissa_value_at_ratio(self, x_ratio: float) -> float:
+        # reference step for x mapping, using the first selected step when available
+        reference_step = min(self._selected_steps) if self._selected_steps else 0
+        # reference step slice
+        reference_slice = self._step_information.abscissa_indices[reference_step]
+        # nearest sample index within the current zoom window for the reference step
+        index = self.sample_index_at_ratio(x_ratio)
+        # return stored abscissa value
+        return float(self._abscissa.data[reference_slice.start + index])
+
     def _get_expressions_to_plot(self, expression: Expression) -> list[Expression]:
         # check we can plot expression as is
         if not expression.complex:
@@ -455,10 +493,15 @@ class Chart:
                     for step, series in rendered_series.items():
                         # step slice
                         step_slice = self._step_information.abscissa_indices[step]
+                        # local zoom bounds for this step
+                        zoom_from_index, zoom_to_index = self._get_step_zoom_bounds(step)
                         # abscissa values
-                        abscissa_values = self._abscissa.data[step_slice][self._zoom_window[0]:self._zoom_window[2]]
+                        abscissa_values = self._abscissa.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
                         # ordinate variant values for this step & zoom window
-                        ordinate_values = ordinate_variant.data[step_slice][self._zoom_window[0]:self._zoom_window[2]]
+                        ordinate_values = ordinate_variant.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
+                        # skip inconsistent slices to protect decimation input contracts
+                        if abscissa_values.size == 0 or ordinate_values.size == 0 or abscissa_values.size != ordinate_values.size:
+                            continue
                         # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
                         x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
                         # remove Inf values

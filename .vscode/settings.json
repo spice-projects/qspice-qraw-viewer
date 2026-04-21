@@ -15,6 +15,8 @@
     "git add": true,
     "git commit": true,
     "git push": true,
-    "git switch": true
+    "git switch": true,
+    "/Users/rogelio/Projects/qspice-qraw-viewer/.venv/bin/python": true,
+    "exit": true
   }
 }
