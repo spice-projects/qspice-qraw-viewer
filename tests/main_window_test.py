@@ -361,6 +361,56 @@ class TestMainWindowSlots(TestCase):
         mock_register.assert_called_once_with(created_window)
         created_window.show.assert_called_once_with()
 
+    def test_menu_open_file_creates_secondary_main_window(self):
+        # arrange
+        win = self._make_win()
+        created_window = MagicMock()
+        # act
+        with patch("viewer.main_window.QFileDialog.getOpenFileName", return_value=("/tmp/example.qraw", "QRAW Files (*.qraw)")), \
+             patch("viewer.main_window.open_qraw_as_window", return_value=created_window) as mock_open, \
+             patch("viewer.main_window._register_child_window") as mock_register:
+            win._on_menu_open_file()
+        # assert
+        mock_open.assert_called_once()
+        mock_register.assert_called_once_with(created_window)
+        created_window.show.assert_called_once_with()
+
+    def test_menu_open_file_canceled(self):
+        # arrange
+        win = self._make_win()
+        # act
+        with patch("viewer.main_window.QFileDialog.getOpenFileName", return_value=("", "QRAW Files (*.qraw)")), \
+             patch("viewer.main_window.open_qraw_as_window") as mock_open, \
+             patch("viewer.main_window._register_child_window") as mock_register:
+            win._on_menu_open_file()
+        # assert
+        mock_open.assert_not_called()
+        mock_register.assert_not_called()
+
+    def test_menu_open_file_load_failure(self):
+        # arrange
+        win = self._make_win()
+        # act
+        with patch("viewer.main_window.QFileDialog.getOpenFileName", return_value=("/tmp/bad.qraw", "QRAW Files (*.qraw)")), \
+             patch("viewer.main_window.open_qraw_as_window", return_value=None) as mock_open, \
+             patch("viewer.main_window._register_child_window") as mock_register:
+            win._on_menu_open_file()
+        # assert
+        mock_open.assert_called_once()
+        mock_register.assert_not_called()
+
+    def test_menu_open_file_ignores_reentry_while_dialog_active(self):
+        # arrange
+        win = self._make_win()
+        # act
+        with patch("viewer.main_window._OPEN_FILE_DIALOG_ACTIVE", True), \
+             patch("viewer.main_window.QFileDialog.getOpenFileName") as mock_dialog, \
+             patch("viewer.main_window.open_qraw_as_window") as mock_open:
+            win._on_menu_open_file()
+        # assert
+        mock_dialog.assert_not_called()
+        mock_open.assert_not_called()
+
     def test_on_qml_ready_sets_step_tool_enabled_for_stepped_files(self):
         # arrange
         win = self._make_win()
