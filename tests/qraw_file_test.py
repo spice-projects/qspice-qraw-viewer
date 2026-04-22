@@ -5,7 +5,7 @@ from unittest import TestCase
 import numpy as np
 
 from viewer.expression import Expression
-from viewer.qraw_file import (AbscissaScale, PlotSuggestion, QRawFile, VariableType, VariableTypeInformation, _process_scale, _process_step)
+from viewer.qraw_file import (AbscissaScale, PlotSuggestion, QRawFile, VariableType, VariableTypeInformation, _process_scale, _process_steps)
 
 FIXTURES_DIR = Path(__file__).parent / "PyQSPICE"
 
@@ -381,13 +381,14 @@ class TestQRawFile(TestCase):
         # assert — time axis must always advance forward
         self.assertTrue(np.all(np.diff(qraw.abscissa.data) >= 0))
 
-    def test_abscissa_data_is_monotonically_increasing_for_ac(self):
+    def test_abscissa_data_is_monotonically_increasing_within_each_ac_step(self):
         # arrange
         filename = FIXTURES_DIR / "VRM_GainBW.qraw"
         # act
         qraw = QRawFile.load(filename)
-        # assert — log10 frequency axis must always advance forward
-        self.assertTrue(np.all(np.diff(qraw.abscissa.data) >= 0))
+        # assert — log10 frequency axis must always advance forward within each step
+        for step_slice in qraw.step_information.abscissa_indices:
+            self.assertTrue(np.all(np.diff(qraw.abscissa.data[step_slice]) >= 0))
 
     def test_abscissa_variable_type_is_time_for_transient(self):
         # arrange
@@ -481,47 +482,6 @@ class TestQRawFileLoad(TestCase):
         self.assertIsNotNone(result)
 
 
-class TestProcessStep(TestCase):
-
-    def test_detects_correct_number_of_steps(self):
-        # arrange — 3 steps of 4 points each; first value repeats at index 4 and 8
-        data = np.array([0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0])
-        abscissa = Expression("Time", data, "s")
-        # act
-        steps, trimmed = _process_step(abscissa, len(data))
-        # assert
-        self.assertEqual(steps, 3)
-
-    def test_returns_abscissa_trimmed_to_one_period(self):
-        # arrange — 3 steps of 4 points each
-        data = np.array([0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0])
-        abscissa = Expression("Time", data, "s")
-        # act
-        steps, trimmed = _process_step(abscissa, len(data))
-        # assert — trimmed abscissa must be one period (4 points)
-        self.assertEqual(len(trimmed.data), 4)
-        np.testing.assert_array_equal(trimmed.data, data[:4])
-
-    def test_preserves_abscissa_name_and_unit(self):
-        # arrange
-        data = np.array([0.0, 1.0, 0.0, 1.0])
-        abscissa = Expression("Time", data, "s")
-        # act
-        _, trimmed = _process_step(abscissa, len(data))
-        # assert
-        self.assertEqual(trimmed.name, "Time")
-        self.assertEqual(trimmed.unit, "s")
-
-    def test_two_steps_returns_step_count_of_two(self):
-        # arrange — 2 steps of 3 points each; abscissa[0] reappears at index 3
-        data = np.array([0.0, 1.0, 2.0, 0.0, 1.0, 2.0])
-        abscissa = Expression("Time", data, "s")
-        # act
-        steps, _ = _process_step(abscissa, len(data))
-        # assert
-        self.assertEqual(steps, 2)
-
-
 class TestProcessScale(TestCase):
 
     def test_decade_applies_log10(self):
@@ -570,6 +530,361 @@ class TestProcessScale(TestCase):
         # assert
         self.assertEqual(result.name, "Frequency")
         self.assertEqual(result.unit, "Hz")
+
+
+class TestProcessSteps(TestCase):
+
+    def test_non_stepped_returns_single_step(self):
+        # arrange
+        stepped = False
+        expr_voltage = Expression("V(out)", np.array([1.0, 2.0, 3.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage]
+        num_points = 3
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 1)
+        self.assertEqual(result.abscissa_indices[0], slice(0, 3))
+        self.assertEqual(result.step_length(0), 3)
+        self.assertEqual(result.keys, [])
+        self.assertEqual(result.values, [])
+
+    def test_stepped_no_parameters_returns_single_step(self):
+        # arrange
+        stepped = True
+        expr_voltage = Expression("V(out)", np.array([1.0, 2.0, 3.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage]
+        num_points = 3
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 1)
+        self.assertEqual(result.abscissa_indices[0], slice(0, 3))
+        self.assertEqual(result.step_length(0), 3)
+        self.assertEqual(result.keys, [])
+        self.assertEqual(result.values, [])
+
+    def test_stepped_single_parameter_two_steps(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 2)
+        self.assertEqual(result.keys, ["R1"])
+        self.assertEqual(result.values, [(1.0,), (2.0,)])
+        self.assertEqual(result.abscissa_indices[0], slice(0, 3))
+        self.assertEqual(result.abscissa_indices[1], slice(3, 6))
+        self.assertEqual(result.step_length(0), 3)
+        self.assertEqual(result.step_length(1), 3)
+
+    def test_stepped_single_parameter_three_steps(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 3)
+        self.assertEqual(result.keys, ["R1"])
+        self.assertEqual(result.values, [(1.0,), (2.0,), (3.0,)])
+        self.assertEqual(result.step_length(0), 2)
+        self.assertEqual(result.step_length(1), 2)
+        self.assertEqual(result.step_length(2), 2)
+
+    def test_stepped_multiple_parameters_two_steps(self):
+        # arrange
+        stepped = True
+        param1_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+        param2_data = np.array([10.0, 10.0, 10.0, 20.0, 20.0, 20.0])
+        expr_param1 = Expression("R1", param1_data, "", variable_type="parameter")
+        expr_param2 = Expression("R2", param2_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param1, expr_param2]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 2)
+        self.assertEqual(result.keys, ["R1", "R2"])
+        self.assertEqual(result.values, [(1.0, 10.0), (2.0, 20.0)])
+
+    def test_stepped_multiple_parameters_unequal_steps(self):
+        # arrange — variable-length steps: 2 points in first step, 4 in second
+        stepped = True
+        param1_data = np.array([1.0, 1.0, 2.0, 2.0, 2.0, 2.0])
+        param2_data = np.array([10.0, 10.0, 20.0, 20.0, 20.0, 20.0])
+        expr_param1 = Expression("R1", param1_data, "", variable_type="parameter")
+        expr_param2 = Expression("R2", param2_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0, 500.0, 600.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param1, expr_param2]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 2)
+        self.assertEqual(result.step_length(0), 2)
+        self.assertEqual(result.step_length(1), 4)
+        self.assertEqual(result.values, [(1.0, 10.0), (2.0, 20.0)])
+
+    def test_parameter_values_extracted_at_step_start(self):
+        # arrange
+        stepped = True
+        param_data = np.array([5.5, 5.5, 5.5, 10.2, 10.2, 10.2])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0, 500.0, 600.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertAlmostEqual(result.values[0][0], 5.5)
+        self.assertAlmostEqual(result.values[1][0], 10.2)
+
+    def test_single_point_per_step(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 2.0, 3.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 3
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 3)
+        self.assertEqual(result.step_length(0), 1)
+        self.assertEqual(result.step_length(1), 1)
+        self.assertEqual(result.step_length(2), 1)
+
+    def test_large_number_of_steps(self):
+        # arrange
+        stepped = True
+        param_data = np.array([float(i // 5) for i in range(100)])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.ones(100), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 100
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 20)
+        for i in range(20):
+            self.assertEqual(result.step_length(i), 5)
+
+    def test_keys_match_parameter_names(self):
+        # arrange
+        stepped = True
+        param1_data = np.array([1.0, 1.0, 2.0, 2.0])
+        param2_data = np.array([10.0, 10.0, 20.0, 20.0])
+        expr_param1 = Expression("resistance", param1_data, "", variable_type="parameter")
+        expr_param2 = Expression("capacitance", param2_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param1, expr_param2]
+        num_points = 4
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.keys, ["resistance", "capacitance"])
+
+    def test_slice_boundaries_correct(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 3.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.arange(6, dtype=float), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.abscissa_indices[0].start, 0)
+        self.assertEqual(result.abscissa_indices[0].stop, 3)
+        self.assertEqual(result.abscissa_indices[1].start, 3)
+        self.assertEqual(result.abscissa_indices[1].stop, 5)
+        self.assertEqual(result.abscissa_indices[2].start, 5)
+        self.assertEqual(result.abscissa_indices[2].stop, 6)
+
+    def test_step_length_sum_equals_total_points(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.arange(7, dtype=float), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 7
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        total_length = sum(result.step_length(i) for i in range(result.length))
+        self.assertEqual(total_length, num_points)
+
+    def test_step_information_uses_primitive_types_for_lengths_and_slices(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 1.0, 2.0, 2.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 4
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertIsInstance(result.length, int)
+        for i in range(result.length):
+            step_slice = result.abscissa_indices[i]
+            self.assertIsInstance(step_slice.start, int)
+            self.assertIsInstance(step_slice.stop, int)
+            self.assertIsInstance(result.step_length(i), int)
+
+    def test_step_information_values_tuples_use_python_primitives(self):
+        # arrange
+        stepped = True
+        param1_data = np.array([1.5, 1.5, 2.5, 2.5])
+        param2_data = np.array([10, 10, 20, 20])
+        expr_param1 = Expression("R1", param1_data, "", variable_type="parameter")
+        expr_param2 = Expression("R2", param2_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param1, expr_param2]
+        num_points = 4
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        for value_tuple in result.values:
+            self.assertIsInstance(value_tuple, tuple)
+            for value in value_tuple:
+                self.assertNotIsInstance(value, np.generic)
+                self.assertIsInstance(value, int | float | bool | str)
+
+    def test_step_information_stores_per_step_abscissa_value_ranges(self):
+        # arrange
+        stepped = True
+        abscissa = Expression("Time", np.array([10.0, 20.0, 30.0, 9.0, 100.0, 998.0, 11.0, 501.0, 1001.0]), "s", variable_type="time")
+        param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.arange(9, dtype=float), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 9
+        # act
+        result = _process_steps(stepped, expressions, abscissa, num_points)
+        # assert
+        self.assertEqual(result.step_abscissa_from_value(0), 10.0)
+        self.assertEqual(result.step_abscissa_to_value(0), 30.0)
+        self.assertEqual(result.step_abscissa_from_value(1), 9.0)
+        self.assertEqual(result.step_abscissa_to_value(1), 998.0)
+        self.assertEqual(result.step_abscissa_from_value(2), 11.0)
+        self.assertEqual(result.step_abscissa_to_value(2), 1001.0)
+
+    def test_step_information_stores_global_abscissa_value_bounds(self):
+        # arrange
+        stepped = True
+        abscissa = Expression("Time", np.array([10.0, 20.0, 30.0, 9.0, 100.0, 998.0, 11.0, 501.0, 1001.0]), "s", variable_type="time")
+        param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.arange(9, dtype=float), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 9
+        # act
+        result = _process_steps(stepped, expressions, abscissa, num_points)
+        # assert
+        self.assertEqual(result.abscissa_from_value, 9.0)
+        self.assertEqual(result.abscissa_to_value, 1001.0)
+
+    def test_all_points_covered_by_slices(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.arange(8, dtype=float), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 8
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert — all indices from 0 to num_points-1 must be covered exactly once
+        covered_indices = set()
+        for i in range(result.length):
+            s = result.abscissa_indices[i]
+            covered_indices.update(range(s.start, s.stop))
+        self.assertEqual(covered_indices, set(range(num_points)))
+
+    def test_floats_and_integers_in_parameter_values(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.5, 1.5, 2.7, 2.7])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage, expr_param]
+        num_points = 4
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(len(result.values), 2)
+        self.assertAlmostEqual(result.values[0][0], 1.5)
+        self.assertAlmostEqual(result.values[1][0], 2.7)
+
+    def test_parameter_at_end_of_sequence(self):
+        # arrange
+        stepped = True
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0]), "V", variable_type="voltage")
+        param_data = np.array([1.0, 1.0, 2.0, 2.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expressions = [expr_voltage, expr_param]
+        num_points = 4
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 2)
+        self.assertEqual(result.keys, ["R1"])
+
+    def test_parameter_at_beginning_of_sequence(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 1.0, 2.0, 2.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0]), "V", variable_type="voltage")
+        expressions = [expr_param, expr_voltage]
+        num_points = 4
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 2)
+        self.assertEqual(result.keys, ["R1"])
+
+    def test_ignores_non_parameter_expressions(self):
+        # arrange
+        stepped = True
+        param_data = np.array([1.0, 1.0, 2.0, 2.0])
+        expr_param = Expression("R1", param_data, "", variable_type="parameter")
+        expr_voltage = Expression("V(out)", np.array([100.0, 200.0, 300.0, 400.0]), "V", variable_type="voltage")
+        expr_current = Expression("I(R1)", np.array([0.5, 0.5, 1.0, 1.0]), "A", variable_type="current")
+        expressions = [expr_voltage, expr_param, expr_current]
+        num_points = 4
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert — only parameter should determine steps, not voltage/current
+        self.assertEqual(result.length, 2)
+        self.assertEqual(result.keys, ["R1"])
+
+    def test_empty_parameters_with_non_stepped(self):
+        # arrange
+        stepped = False
+        expr_voltage = Expression("V(out)", np.array([1.0, 2.0]), "V", variable_type="voltage")
+        expressions = [expr_voltage]
+        num_points = 2
+        # act
+        result = _process_steps(stepped, expressions, expr_voltage, num_points)
+        # assert
+        self.assertEqual(result.length, 1)
+        self.assertEqual(result.keys, [])
 
 
 class TestVariableTypeInformation(TestCase):

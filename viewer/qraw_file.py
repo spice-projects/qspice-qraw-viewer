@@ -62,16 +62,17 @@ class PlotSuggestion:
 
 class StepInformation:
 
-    def __init__(self, keys: list[str], values: list[tuple], abscissa_indices: list[slice]):
+    def __init__(self, keys: list[str], values: list[tuple], abscissa_indices: list[slice], step_lengths: list[int], abscissa_value_ranges: list[tuple[float, float]]):
         # fields
         self._keys = keys
         self._values = values
         self._abscissa_indices = abscissa_indices
+        self._step_lengths = step_lengths
+        self._abscissa_value_ranges = abscissa_value_ranges
         # calculated values for quick lookup
         self._step_count = len(abscissa_indices)
-        self._step_lengths = [step_indices.stop - step_indices.start for step_indices in self._abscissa_indices]
-        self._abscissa_from_index = 0
-        self._abscissa_to_index = int(max(self._step_lengths, default=0))
+        self._abscissa_from_value = min((min(value_range) for value_range in self._abscissa_value_ranges), default=0.0)
+        self._abscissa_to_value = max((max(value_range) for value_range in self._abscissa_value_ranges), default=0.0)
 
     @property
     def keys(self) -> list[str]:
@@ -90,20 +91,35 @@ class StepInformation:
         return self._step_count
 
     @property
-    def abscissa_from_index(self) -> int:
-        return self._abscissa_from_index
+    def abscissa_from_value(self) -> float:
+        return self._abscissa_from_value
 
     @property
-    def abscissa_to_index(self) -> int:
-        return self._abscissa_to_index
+    def abscissa_to_value(self) -> float:
+        return self._abscissa_to_value
 
     def step_length(self, step_index: int) -> int:
         return self._step_lengths[step_index]
 
+    def step_abscissa_from_value(self, step_index: int) -> float:
+        return self._abscissa_value_ranges[step_index][0]
 
-def _process_steps(expressions: list[Expression], num_points: int) -> StepInformation:
+    def step_abscissa_to_value(self, step_index: int) -> float:
+        return self._abscissa_value_ranges[step_index][1]
+
+
+def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expression, num_points: int) -> StepInformation:
+    # check this is a stepped analysis
+    if not stepped:
+        # not a stepped analysis — return a single step covering the entire abscissa range with no parameter values
+        return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], step_lengths=[num_points], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
+    # parameter expressions
+    parameters = [expr for expr in expressions if expr.variable_type == "parameter"]
+    if len(parameters) == 0:
+        # treat as unstepped
+        return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], step_lengths=[num_points], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
     # stack all parameter values into a matrix (num_points, num_parameters)
-    stacked = np.column_stack([expr.data for expr in expressions])
+    stacked = np.column_stack([expression.data for expression in parameters]) if len(parameters) > 1 else parameters[0].data.reshape(-1, 1)
     # detect changes in parameter values (N - 1, )
     changed = np.any(stacked[1:] != stacked[:-1], axis=1)
     # boundaries
@@ -111,10 +127,21 @@ def _process_steps(expressions: list[Expression], num_points: int) -> StepInform
     # start and end indices of each step
     starts = np.concatenate(([0], boundaries))
     ends = np.concatenate((boundaries, [num_points]))
+    # convert to Python int lists for performance — .tolist() converts numpy array to native Python list, avoiding np.int64 scalars in slice operations and step_lengths
+    starts_list = starts.astype(int, copy=False).tolist()
+    ends_list = ends.astype(int, copy=False).tolist()
     # parameter values at the start of each step
-    values = [tuple(stacked[s].tolist()) for s in starts]
+    values = [tuple(stacked[int(s)].tolist()) for s in starts_list]
+    # calculate slices for each one of the steps
+    abscissa_indices = [slice(s, e) for s, e in zip(starts_list, ends_list)]
+    # per-step abscissa value ranges in display space
+    abscissa_value_ranges = [(float(abscissa.data[step_slice.start]), float(abscissa.data[step_slice.stop - 1])) for step_slice in abscissa_indices]
+    # step lengths
+    step_lengths = [e - s for e, s in zip(ends_list, starts_list)]
+    # log step information
+    logger.debug("Detected %d steps in data, step lengths: %s", len(starts), step_lengths)
     # create step information object
-    return StepInformation(keys=[expr.name for expr in expressions], values=values, abscissa_indices=[slice(int(s), int(e)) for s, e in zip(starts, ends)])
+    return StepInformation(keys=[expression.name for expression in parameters], values=values, abscissa_indices=abscissa_indices, step_lengths=step_lengths, abscissa_value_ranges=abscissa_value_ranges)
 
 
 def _process_scale(abscissa: Expression, scale: AbscissaScale) -> Expression:
@@ -189,9 +216,6 @@ class QRawFile:
     @property
     def steps(self) -> int:
         return self._step_information.length
-
-    def step_length(self, step_index: int) -> int:
-        return self._step_information.step_length(step_index)
 
     @property
     def abscissa(self) -> Expression:
@@ -392,10 +416,10 @@ class QRawFile:
                     except Exception as ex:
                         # log error but continue processing other aliasses
                         logger.error("Failed to evaluate expression '%s': %s", alias_name, ex)
-            # process steps in stepped files
-            step_information = _process_steps([expr for expr in variables if expr.variable_type == "parameter"], num_points) if stepped else StepInformation(keys=[], values=[tuple()], abscissa_indices=[slice(0, num_points)])
             # process scale (x axis)
             abscissa = _process_scale(variables[0], abscissa_scale)
+            # process steps in stepped files using the scaled abscissa values
+            step_information = _process_steps(stepped, variables, abscissa, num_points)
             # create QRawFile instance with parsed header, variables, and binary data; pass the mmap so it stays alive for the lifetime of the QRawFile — Variable arrays are views into it
             return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, step_information=step_information, abscissa=abscissa, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), expression_manager=expression_manager, _mmap=data)
         finally:

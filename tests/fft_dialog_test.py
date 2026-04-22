@@ -27,15 +27,15 @@ def _make_dialog(abscissa_values=None, zoom_from=0, zoom_to=10):
     abscissa = Expression("Time", abscissa_values, "s")
     e1 = Expression("V(R1)", np.ones(len(abscissa_values)), "V")
     e2 = Expression("I(L1)", np.ones(len(abscissa_values)) * 2.0, "A")
-    dialog = FftDialog.__new__(FftDialog)
+    dialog = object.__new__(FftDialog)
     dialog._expressions = [e1, e2]
     dialog._abscissa = abscissa
     dialog._zoom_from_index = zoom_from
     dialog._zoom_to_index = zoom_to
     dialog._selected_expressions = {e1, e2}
     dialog._result_expressions = []
-    dialog._result_from_index = 0
-    dialog._result_to_index = len(abscissa_values)
+    dialog._result_from_index = float(abscissa_values[0])
+    dialog._result_to_index = float(abscissa_values[-1])
     dialog._result_window = WindowFunction.RECTANGULAR
     dialog._result_zero_pad = ZeroPadding.NONE
     dialog._result_normalize = False
@@ -171,30 +171,27 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # act
         dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
-        self.assertEqual(dialog._result_from_index, 0)
-        self.assertEqual(dialog._result_to_index, 11)
+        self.assertEqual(dialog._result_from_index, 0.0)
+        self.assertEqual(dialog._result_to_index, 1.0)
 
     def test_range_mode_zoom_uses_stored_zoom_window(self):
-        # arrange — zoom window [3, 8)
-        dialog, _e1, _e2 = _make_dialog(np.linspace(0.0, 1.0, 11), zoom_from=3, zoom_to=8)
+        # arrange — zoom window [0.3, 0.8]
+        dialog, _e1, _e2 = _make_dialog(np.linspace(0.0, 1.0, 11), zoom_from=0.3, zoom_to=0.8)
         # act
         dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "zoom", 0.0, 1.0, False)
         # assert
-        self.assertEqual(dialog._result_from_index, 3)
-        self.assertEqual(dialog._result_to_index, 8)
+        self.assertEqual(dialog._result_from_index, 0.3)
+        self.assertEqual(dialog._result_to_index, 0.8)
 
-    def test_range_mode_custom_maps_time_to_indices(self):
+    def test_range_mode_custom_uses_clamped_values(self):
         # arrange — 11-point abscissa 0…1 s
         abscissa = np.linspace(0.0, 1.0, 11)
         dialog, _e1, _e2 = _make_dialog(abscissa)
         # act — request range 0.2 s … 0.8 s (avoid 0.6 which has floating-point representability issues)
         dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.2, 0.8, False)
-        # assert — from_index=2 for 0.2; to_index verified against actual searchsorted output
-        self.assertEqual(dialog._result_from_index, 2)
-        # searchsorted(arr, 0.8, side='right') where arr[8]=0.8 → position 9
-        import numpy as _np
-        expected_to = int(_np.searchsorted(abscissa, 0.8, side="right"))
-        self.assertEqual(dialog._result_to_index, expected_to)
+        # assert — custom values are stored directly after domain clamping
+        self.assertEqual(dialog._result_from_index, 0.2)
+        self.assertEqual(dialog._result_to_index, 0.8)
 
     def test_range_mode_custom_clamps_above_total(self):
         # arrange
@@ -202,17 +199,18 @@ class TestFftDialogOnDialogAccepted(TestCase):
         dialog, _e1, _e2 = _make_dialog(abscissa)
         # act — to_time beyond the end of the array
         dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.5, 999.0, False)
-        # assert — to_index clamped to total (11)
-        self.assertEqual(dialog._result_to_index, 11)
+        # assert — upper bound clamped to the last abscissa value
+        self.assertEqual(dialog._result_to_index, 1.0)
 
-    def test_range_mode_custom_ensures_minimum_two_samples(self):
-        # arrange — very narrow custom range that resolves to the same index
+    def test_range_mode_custom_preserves_single_value_window(self):
+        # arrange — exact single-value custom range
         abscissa = np.linspace(0.0, 1.0, 11)
         dialog, _e1, _e2 = _make_dialog(abscissa)
-        # act — from_time and to_time both map to index 5
+        # act
         dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.5, 0.5, False)
-        # assert — at least 2 samples guaranteed
-        self.assertGreaterEqual(dialog._result_to_index - dialog._result_from_index, 2)
+        # assert
+        self.assertEqual(dialog._result_from_index, 0.5)
+        self.assertEqual(dialog._result_to_index, 0.5)
 
     def test_range_mode_unknown_falls_back_to_full(self):
         # arrange
@@ -220,8 +218,8 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # act — unrecognised range_mode triggers full-range fallback
         dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "unknown_mode", 0.0, 1.0, False)
         # assert
-        self.assertEqual(dialog._result_from_index, 0)
-        self.assertEqual(dialog._result_to_index, 11)
+        self.assertEqual(dialog._result_from_index, 0.0)
+        self.assertEqual(dialog._result_to_index, 1.0)
 
     def test_keep_dc_flag_true(self):
         # arrange
@@ -258,16 +256,16 @@ class TestFftDialogResultProperties(TestCase):
     def test_result_from_index_property(self):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
-        dialog._result_from_index = 4
+        dialog._result_from_index = 0.4
         # act / assert
-        self.assertEqual(dialog.result_from_index, 4)
+        self.assertEqual(dialog.result_from_index, 0.4)
 
     def test_result_to_index_property(self):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
-        dialog._result_to_index = 7
+        dialog._result_to_index = 0.7
         # act / assert
-        self.assertEqual(dialog.result_to_index, 7)
+        self.assertEqual(dialog.result_to_index, 0.7)
 
     def test_result_window_property(self):
         # arrange

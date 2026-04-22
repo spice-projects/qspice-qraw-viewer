@@ -27,8 +27,8 @@ class FftDialog(QDialog):
     ----------
     expressions      : ordinate expressions available for FFT (abscissa excluded).
     abscissa         : time-domain abscissa expression.
-    zoom_from_index  : left edge of the current visible zoom window (sample index).
-    zoom_to_index    : right edge of the current visible zoom window (sample index).
+    zoom_from_index  : left edge of the current visible zoom window (abscissa value).
+    zoom_to_index    : right edge of the current visible zoom window (abscissa value).
     parent           : optional parent widget.
     """
 
@@ -43,8 +43,8 @@ class FftDialog(QDialog):
         self._selected_expressions: set[Expression] = set(expressions)
         # result fields populated when the dialog is accepted
         self._result_expressions: list[Expression] = []
-        self._result_from_index: int = 0
-        self._result_to_index: int = len(abscissa.data)
+        self._result_from_index: float = float(abscissa.data[0])
+        self._result_to_index: float = float(abscissa.data[-1])
         self._result_window: WindowFunction = WindowFunction.HANNING
         self._result_zero_pad: ZeroPadding = ZeroPadding.NONE
         self._result_normalize: bool = False
@@ -68,8 +68,8 @@ class FftDialog(QDialog):
             "binWidthPreview": f"{df:.4g} Hz / bin",
             "abscissaMin": float(abscissa_values[0]),
             "abscissaMax": float(abscissa_values[-1]),
-            "zoomFromTime": float(abscissa_values[min(zoom_from_index, len(abscissa_values) - 1)]),
-            "zoomToTime": float(abscissa_values[min(zoom_to_index, len(abscissa_values)) - 1]),
+            "zoomFromTime": float(zoom_from_index),
+            "zoomToTime": float(zoom_to_index),
             "defaultWindowIndex": [w.value for w in WindowFunction].index(WindowFunction.HANNING.value),
         }
         # create QML view
@@ -145,23 +145,6 @@ class FftDialog(QDialog):
         self._result_keep_dc = keep_dc
         # data range
         abscissa_values = self._abscissa.data
-        # total number of abscissa samples
-        total = len(abscissa_values)
-        if range_mode == "zoom":
-            # use the current visible zoom window
-            self._result_from_index = self._zoom_from_index
-            self._result_to_index = self._zoom_to_index
-        elif range_mode == "custom":
-            # map user-supplied time values to nearest sample indices
-            from_idx = int(np.searchsorted(abscissa_values, custom_from))
-            to_idx = int(np.searchsorted(abscissa_values, custom_to, side="right"))
-            # clamp to valid range ensuring at least 2 samples
-            self._result_from_index = max(0, min(from_idx, total - 2))
-            self._result_to_index = max(self._result_from_index + 2, min(to_idx, total))
-        else:
-            # use the full abscissa range
-            self._result_from_index = 0
-            self._result_to_index = total
         # proceed to accept the dialog and close it
         self.accept()
 
@@ -170,11 +153,11 @@ class FftDialog(QDialog):
         return self._result_expressions
 
     @property
-    def result_from_index(self) -> int:
+    def result_from_index(self) -> float:
         return self._result_from_index
 
     @property
-    def result_to_index(self) -> int:
+    def result_to_index(self) -> float:
         return self._result_to_index
 
     @property

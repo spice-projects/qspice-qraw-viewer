@@ -36,7 +36,7 @@ _SERIES_COLOR_PALETTE = [
 
 class Chart:
 
-    def __init__(self, component: QQuickItem, char_type: str, expression_manager: ExpressionManager, abscissa: Expression, abscissa_from_index: int, abscissa_to_index: int, step_information: StepInformation, decimate_target: int):
+    def __init__(self, component: QQuickItem, char_type: str, expression_manager: ExpressionManager, abscissa: Expression, step_information: StepInformation, decimate_target: int):
         # store component
         self._component = component
         # store chart type
@@ -46,7 +46,7 @@ class Chart:
         # store variables
         self._abscissa = abscissa
         # current zoom window (x: in abscissa index, y: in ordinate percentages)
-        self._zoom_window = (abscissa_from_index, 0.0, abscissa_to_index, 1.0)
+        self._zoom_window = (0, 0.0, 1, 1.0)
         # steps
         self._step_information = step_information
         self._selected_steps: set[int] = set(range(self._step_information.length))
@@ -90,17 +90,8 @@ class Chart:
         self.plot_series(self.expressions)
 
     def render(self, abscissa_label: str, abscissa_scale: str, initial_expressions: set[Expression]):
-        # abscissa data for the first step
-        first_step_slice = self._step_information.abscissa_indices[0]
-        # local zoom bounds for the first step
-        first_from_index, first_to_index = self._get_step_zoom_bounds(0)
-        # abscissa data for the first step and local zoom range
-        abscissa_data = self._abscissa.data[first_step_slice.start + first_from_index:first_step_slice.start + first_to_index]
-        # x0 and x1 (from first step)
-        abscissa_left_value = float(abscissa_data[0])
-        abscissa_right_value = float(abscissa_data[-1])
         # initialize chart component
-        self._component.initialize(abscissa_label, self._abscissa.unit, abscissa_scale, abscissa_left_value, abscissa_right_value)
+        self._component.initialize(abscissa_label, self._abscissa.unit, abscissa_scale, self._step_information.abscissa_from_value, self._step_information.abscissa_to_value)
         # render all expressions as series
         self.plot_series(initial_expressions)
         # auto range axes based on the added series
@@ -118,13 +109,13 @@ class Chart:
         for label, (expression, ordinate_series) in self._series.items():
             # check expression should be removed
             if expression not in expressions:
-                # log information
-                logger.debug("Removing series for expression '%s' from chart", expression.name)
                 # enqueue series for removal
                 for ordinate_variant, (axis, rendered_series, _, _, _) in ordinate_series.items():
                     # release axis if no longer in use
                     if self._release_y_axis(axis):
                         axes_to_remove.append(axis)
+                    # log information
+                    logger.debug("Removing series for expression [%s] from chart, steps: %s", ordinate_variant.name, list(rendered_series.keys()))
                     # append to list for later removal from chart
                     series_to_remove.append([ordinate_variant.name, list(rendered_series.values())])
                 # remove from tracked series so we don't try to update it later
@@ -144,16 +135,12 @@ class Chart:
                 for step in list(rendered_series.keys()):
                     # check step should be removed
                     if step not in self._selected_steps:
+                        # log information
+                        logger.debug("Removing series for expression [%s] from chart, step: %d", ordinate_variant.name, step)
                         # append to list for later removal from chart
                         series_to_remove.append([None, [rendered_series[step]]])
                         # remove from dictionary so we don't try to update it later
                         del rendered_series[step]
-                # check we need to generate a color for this expression
-                if color is None:
-                    # assign next color in palette
-                    color = _SERIES_COLOR_PALETTE[self._next_color_index % len(_SERIES_COLOR_PALETTE)]
-                    # update index
-                    self._next_color_index += 1
                 # process axis as needed
                 if y_axis is None:
                     # find y axis for measurement type
@@ -163,6 +150,12 @@ class Chart:
                         logger.warning(f"Cannot add series '{ordinate_variant.name}' of measurement type {ordinate_variant.unit} to chart — maximum number of Y axes reached")
                         # exit loop
                         break
+                # check we need to generate a color for this expression
+                if color is None:
+                    # assign next color in palette
+                    color = _SERIES_COLOR_PALETTE[self._next_color_index % len(_SERIES_COLOR_PALETTE)]
+                    # update index
+                    self._next_color_index += 1
                 # ordinate series to render
                 ordinate_series_to_render: list[QLineSeries] = []
                 # loop steps
@@ -172,12 +165,17 @@ class Chart:
                         continue
                     # step slice
                     step_slice = self._step_information.abscissa_indices[step]
-                    # local zoom bounds for this step
-                    zoom_from_index, zoom_to_index = self._get_step_zoom_bounds(step)
-                    # apply zoom window to abscissa
-                    abscissa_values = self._abscissa.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
-                    # ordinate variant values for this step (as contiguous array in memory), apply zoom window
-                    ordinate_values = ordinate_variant.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
+
+                    # # local zoom bounds for this step
+                    # zoom_from_index, zoom_to_index = self._get_step_zoom_bounds(step)
+                    # # apply zoom window to abscissa
+                    # abscissa_values = self._abscissa.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
+                    # # ordinate variant values for this step (as contiguous array in memory), apply zoom window
+                    # ordinate_values = ordinate_variant.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
+
+                    abscissa_values = self._abscissa.data[step_slice]
+                    ordinate_values = ordinate_variant.data[step_slice]
+
                     # skip inconsistent slices to protect decimation input contracts
                     if abscissa_values.size == 0 or ordinate_values.size == 0 or abscissa_values.size != ordinate_values.size:
                         continue
@@ -194,6 +192,8 @@ class Chart:
                     # check all values were non-finite after filtering
                     if x_np.size == 0 or y_np.size == 0:
                         continue
+                    # log information
+                    logger.debug("Adding series for expression [%s], step: %d, original size: %d, decimated size: %d", ordinate_variant.name, step, abscissa_values.size, x_np.size)
                     # create series and hand buffers directly to Qt — no Python loop
                     series = QLineSeries()
                     series.setColor(color)
@@ -249,63 +249,65 @@ class Chart:
             y_axis.setRange(y_min - delta, y_max + delta)
 
     def update_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
-        # vertical changes flag
-        vertical_changed = False
-        # check vertical zoom ratios were provided
-        if y_top_ratio is not None and y_bottom_ratio is not None:
-            # current zoom window
-            _, current_y_top_ratio, _, current_y_bottom_ratio = self._zoom_window
-            # calculate new ratios based on the position of the mouse event within the chart panel and the current zoom window
-            y_top_ratio = current_y_top_ratio + y_top_ratio * (current_y_bottom_ratio - current_y_top_ratio)
-            y_bottom_ratio = current_y_top_ratio + y_bottom_ratio * (current_y_bottom_ratio - current_y_top_ratio)
-            # update zoom window
-            self._zoom_window = (self._zoom_window[0], y_top_ratio, self._zoom_window[2], y_bottom_ratio)
-            # update flag
-            vertical_changed = True
-        # check horizontal zoom indexes were provided
-        if abscissa_from_index >= 0 and abscissa_to_index >= 0:
-            # update zoom window
-            self._zoom_window = (abscissa_from_index, self._zoom_window[1], abscissa_to_index, self._zoom_window[3])
-            # process all series to apply the new zoom window, full redraw if horizontal zoom changed
-            self._redraw_all_series()
-            # auto range axes based on the new zoom window
-            return self.auto_range() if vertical_changed else None
-        # partial redraw sufficient when only vertical zoom changed
-        _, y_top_ratio, _, y_bottom_ratio = self._zoom_window
-        # update axis ranges based on collected min and max values for each variable type
-        for y_axis, (y_min, y_max) in self._axis_ranges.items():
-            # range
-            scale = y_max - y_min
-            # set y axis range
-            y_axis.setRange(y_min + y_top_ratio * scale, y_min + y_bottom_ratio * scale)
+        # # vertical changes flag
+        # vertical_changed = False
+        # # check vertical zoom ratios were provided
+        # if y_top_ratio is not None and y_bottom_ratio is not None:
+        #     # current zoom window
+        #     _, current_y_top_ratio, _, current_y_bottom_ratio = self._zoom_window
+        #     # calculate new ratios based on the position of the mouse event within the chart panel and the current zoom window
+        #     y_top_ratio = current_y_top_ratio + y_top_ratio * (current_y_bottom_ratio - current_y_top_ratio)
+        #     y_bottom_ratio = current_y_top_ratio + y_bottom_ratio * (current_y_bottom_ratio - current_y_top_ratio)
+        #     # update zoom window
+        #     self._zoom_window = (self._zoom_window[0], y_top_ratio, self._zoom_window[2], y_bottom_ratio)
+        #     # update flag
+        #     vertical_changed = True
+        # # check horizontal zoom indexes were provided
+        # if abscissa_from_index >= 0 and abscissa_to_index >= 0:
+        #     # update zoom window
+        #     self._zoom_window = (abscissa_from_index, self._zoom_window[1], abscissa_to_index, self._zoom_window[3])
+        #     # process all series to apply the new zoom window, full redraw if horizontal zoom changed
+        #     self._redraw_all_series()
+        #     # auto range axes based on the new zoom window
+        #     return self.auto_range() if vertical_changed else None
+        # # partial redraw sufficient when only vertical zoom changed
+        # _, y_top_ratio, _, y_bottom_ratio = self._zoom_window
+        # # update axis ranges based on collected min and max values for each variable type
+        # for y_axis, (y_min, y_max) in self._axis_ranges.items():
+        #     # range
+        #     scale = y_max - y_min
+        #     # set y axis range
+        #     y_axis.setRange(y_min + y_top_ratio * scale, y_min + y_bottom_ratio * scale)
+        ...
 
     def reset_zoom_window(self, abscissa_from_index: int, abscissa_to_index: int, y_top_ratio: float | None, y_bottom_ratio: float | None):
-        # vertical changes flag
-        vertical_changed = False
-        # check vertical zoom ratios were provided
-        if y_top_ratio is not None and y_bottom_ratio is not None:
-            # update flag
-            vertical_changed = y_top_ratio != self._zoom_window[1] or y_bottom_ratio != self._zoom_window[3]
-            # update zoom window
-            self._zoom_window = (self._zoom_window[0], y_top_ratio, self._zoom_window[2], y_bottom_ratio)
-        # check horizontal zoom indexes were provided
-        if abscissa_from_index >= 0 and abscissa_to_index >= 0:
-            # update zoom window
-            self._zoom_window = (abscissa_from_index, self._zoom_window[1], abscissa_to_index, self._zoom_window[3])
-            # process all series to apply the new zoom window, full redraw if horizontal zoom changed
-            self._redraw_all_series()
-            # auto range axes if vertical zoom also changed, otherwise just update axis ranges based on the new zoom window
-            return self.auto_range() if vertical_changed else None
-        # check if vertical zoom changed, if not we can skip the redraw and just update the axis ranges based on the new zoom window
-        if vertical_changed:
-            # log information
-            logger.debug("Vertical zoom changed, updating axis ranges based on new zoom window")
-            # partial redraw sufficient when only vertical zoom changed
-            _, y_top_ratio, _, y_bottom_ratio = self._zoom_window
-            # update axis ranges based on collected min and max values for each variable type
-            for y_axis, (y_min, y_max) in self._axis_ranges.items():
-                # set y axis range
-                y_axis.setRange(y_min, y_max)
+        # # vertical changes flag
+        # vertical_changed = False
+        # # check vertical zoom ratios were provided
+        # if y_top_ratio is not None and y_bottom_ratio is not None:
+        #     # update flag
+        #     vertical_changed = y_top_ratio != self._zoom_window[1] or y_bottom_ratio != self._zoom_window[3]
+        #     # update zoom window
+        #     self._zoom_window = (self._zoom_window[0], y_top_ratio, self._zoom_window[2], y_bottom_ratio)
+        # # check horizontal zoom indexes were provided
+        # if abscissa_from_index >= 0 and abscissa_to_index >= 0:
+        #     # update zoom window
+        #     self._zoom_window = (abscissa_from_index, self._zoom_window[1], abscissa_to_index, self._zoom_window[3])
+        #     # process all series to apply the new zoom window, full redraw if horizontal zoom changed
+        #     self._redraw_all_series()
+        #     # auto range axes if vertical zoom also changed, otherwise just update axis ranges based on the new zoom window
+        #     return self.auto_range() if vertical_changed else None
+        # # check if vertical zoom changed, if not we can skip the redraw and just update the axis ranges based on the new zoom window
+        # if vertical_changed:
+        #     # log information
+        #     logger.debug("Vertical zoom changed, updating axis ranges based on new zoom window")
+        #     # partial redraw sufficient when only vertical zoom changed
+        #     _, y_top_ratio, _, y_bottom_ratio = self._zoom_window
+        #     # update axis ranges based on collected min and max values for each variable type
+        #     for y_axis, (y_min, y_max) in self._axis_ranges.items():
+        #         # set y axis range
+        #         y_axis.setRange(y_min, y_max)
+        ...
 
     def clear(self):
         # Qt enqueues the visual removal of series asynchronously. Python owns the QLineSeries, so we must NOT let Python GC them until Qt has finished processing the removal queue.
@@ -478,75 +480,76 @@ class Chart:
         return []
 
     def _redraw_all_series(self):
-        # x0 and x1
-        abscissa_left_value: float | None = None
-        abscissa_right_value: float | None = None
-        try:
-            # loop existing series
-            for _, (_, ordinate_series) in self._series.items():
-                # loop series data (actual data visible in chart)
-                for ordinate_variant, (y_axis, rendered_series, _, _, color) in ordinate_series.items():
-                    # min and max value recalculation for the new zoom window
-                    min_value = float("inf")
-                    max_value = float("-inf")
-                    # loop steps
-                    for step, series in rendered_series.items():
-                        # step slice
-                        step_slice = self._step_information.abscissa_indices[step]
-                        # local zoom bounds for this step
-                        zoom_from_index, zoom_to_index = self._get_step_zoom_bounds(step)
-                        # abscissa values
-                        abscissa_values = self._abscissa.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
-                        # ordinate variant values for this step & zoom window
-                        ordinate_values = ordinate_variant.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
-                        # skip inconsistent slices to protect decimation input contracts
-                        if abscissa_values.size == 0 or ordinate_values.size == 0 or abscissa_values.size != ordinate_values.size:
-                            continue
-                        # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
-                        x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
-                        # remove Inf values
-                        inf_mask = np.isinf(y_np)
-                        if inf_mask.any():
-                            # mask for finite values
-                            keep_mask = ~inf_mask
-                            # update x and y with finite values only
-                            x_np = x_np[keep_mask]
-                            y_np = y_np[keep_mask]
-                        # check all values were non-finite after filtering
-                        if x_np.size == 0 or y_np.size == 0:
-                            continue
-                        # update series with decimated data
-                        series.replaceNp(x_np, y_np)
-                        # update min and max values
-                        min_value = min(min_value, float(np.min(y_np)))
-                        max_value = max(max_value, float(np.max(y_np)))
-                        # update x axis left and right values based on the new zoom window
-                        if abscissa_left_value is None or abscissa_right_value is None:
-                            # initialize values for the first series processed
-                            abscissa_left_value = float(abscissa_values[0])
-                            abscissa_right_value = float(abscissa_values[-1])
-                        elif abscissa_left_value < abscissa_right_value:
-                            # ascending abscissa, update left and right values as needed
-                            abscissa_left_value = min(abscissa_left_value, float(abscissa_values[0]))
-                            abscissa_right_value = max(abscissa_right_value, float(abscissa_values[-1]))
-                        else:
-                            # descending abscissa, update left and right values as needed
-                            abscissa_left_value = max(abscissa_left_value, float(abscissa_values[0]))
-                            abscissa_right_value = min(abscissa_right_value, float(abscissa_values[-1]))
-                    # calculate scale for Y axis
-                    scale = max(abs(max_value), abs(min_value))
-                    # Y axis range
-                    y_range = max_value - min_value
-                    if y_range <= scale * 1e-9:
-                        y_range = abs(max_value) * 0.01 if scale != 0 else 1.0
-                    # protect against very small ranges
-                    delta = max(0.01 * y_range, 1e-3)
-                    # update dictionary entry
-                    ordinate_series[ordinate_variant] = (y_axis, rendered_series, min_value - delta, max_value + delta, color)
-        finally:
-            # resize abscissa axis
-            if abscissa_left_value is not None and abscissa_right_value is not None:
-                self._component.resizeAbscissa(abscissa_left_value, abscissa_right_value)
+        # # x0 and x1
+        # abscissa_left_value: float | None = None
+        # abscissa_right_value: float | None = None
+        # try:
+        #     # loop existing series
+        #     for _, (_, ordinate_series) in self._series.items():
+        #         # loop series data (actual data visible in chart)
+        #         for ordinate_variant, (y_axis, rendered_series, _, _, color) in ordinate_series.items():
+        #             # min and max value recalculation for the new zoom window
+        #             min_value = float("inf")
+        #             max_value = float("-inf")
+        #             # loop steps
+        #             for step, series in rendered_series.items():
+        #                 # step slice
+        #                 step_slice = self._step_information.abscissa_indices[step]
+        #                 # local zoom bounds for this step
+        #                 zoom_from_index, zoom_to_index = self._get_step_zoom_bounds(step)
+        #                 # abscissa values
+        #                 abscissa_values = self._abscissa.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
+        #                 # ordinate variant values for this step & zoom window
+        #                 ordinate_values = ordinate_variant.data[step_slice.start + zoom_from_index:step_slice.start + zoom_to_index]
+        #                 # skip inconsistent slices to protect decimation input contracts
+        #                 if abscissa_values.size == 0 or ordinate_values.size == 0 or abscissa_values.size != ordinate_values.size:
+        #                     continue
+        #                 # decimate x and y jointly so every plotted (x, y) pair maps to the same original sample
+        #                 x_np, y_np = decimate_xy(abscissa_values, ordinate_values, self._decimate_target, _DECIMATION_ALGORITHM)
+        #                 # remove Inf values
+        #                 inf_mask = np.isinf(y_np)
+        #                 if inf_mask.any():
+        #                     # mask for finite values
+        #                     keep_mask = ~inf_mask
+        #                     # update x and y with finite values only
+        #                     x_np = x_np[keep_mask]
+        #                     y_np = y_np[keep_mask]
+        #                 # check all values were non-finite after filtering
+        #                 if x_np.size == 0 or y_np.size == 0:
+        #                     continue
+        #                 # update series with decimated data
+        #                 series.replaceNp(x_np, y_np)
+        #                 # update min and max values
+        #                 min_value = min(min_value, float(np.min(y_np)))
+        #                 max_value = max(max_value, float(np.max(y_np)))
+        #                 # update x axis left and right values based on the new zoom window
+        #                 if abscissa_left_value is None or abscissa_right_value is None:
+        #                     # initialize values for the first series processed
+        #                     abscissa_left_value = float(abscissa_values[0])
+        #                     abscissa_right_value = float(abscissa_values[-1])
+        #                 elif abscissa_left_value < abscissa_right_value:
+        #                     # ascending abscissa, update left and right values as needed
+        #                     abscissa_left_value = min(abscissa_left_value, float(abscissa_values[0]))
+        #                     abscissa_right_value = max(abscissa_right_value, float(abscissa_values[-1]))
+        #                 else:
+        #                     # descending abscissa, update left and right values as needed
+        #                     abscissa_left_value = max(abscissa_left_value, float(abscissa_values[0]))
+        #                     abscissa_right_value = min(abscissa_right_value, float(abscissa_values[-1]))
+        #             # calculate scale for Y axis
+        #             scale = max(abs(max_value), abs(min_value))
+        #             # Y axis range
+        #             y_range = max_value - min_value
+        #             if y_range <= scale * 1e-9:
+        #                 y_range = abs(max_value) * 0.01 if scale != 0 else 1.0
+        #             # protect against very small ranges
+        #             delta = max(0.01 * y_range, 1e-3)
+        #             # update dictionary entry
+        #             ordinate_series[ordinate_variant] = (y_axis, rendered_series, min_value - delta, max_value + delta, color)
+        # finally:
+        #     # resize abscissa axis
+        #     if abscissa_left_value is not None and abscissa_right_value is not None:
+        #         self._component.resizeAbscissa(abscissa_left_value, abscissa_right_value)
+        ...
 
     def _get_y_axis(self, unit: str) -> QAbstractAxis | None:
         # existing axis for measurement type
