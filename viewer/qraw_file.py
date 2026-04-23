@@ -62,17 +62,17 @@ class PlotSuggestion:
 
 class StepInformation:
 
-    def __init__(self, keys: list[str], values: list[tuple], abscissa_indices: list[slice], step_lengths: list[int], abscissa_value_ranges: list[tuple[float, float]]):
+    def __init__(self, keys: list[str], values: list[tuple], abscissa_indices: list[slice], abscissa_value_ranges: list[tuple[float, float]]):
         # fields
         self._keys = keys
         self._values = values
         self._abscissa_indices = abscissa_indices
-        self._step_lengths = step_lengths
         self._abscissa_value_ranges = abscissa_value_ranges
         # calculated values for quick lookup
         self._step_count = len(abscissa_indices)
-        self._abscissa_from_value = min((min(value_range) for value_range in self._abscissa_value_ranges), default=0.0)
-        self._abscissa_to_value = max((max(value_range) for value_range in self._abscissa_value_ranges), default=0.0)
+        self._abscissa_left_value = min((min(value_range) for value_range in self._abscissa_value_ranges), default=0.0)
+        self._abscissa_right_value = max((max(value_range) for value_range in self._abscissa_value_ranges), default=0.0)
+        self._abscissa_ascending = self._abscissa_left_value <= self._abscissa_right_value
 
     @property
     def keys(self) -> list[str]:
@@ -91,20 +91,21 @@ class StepInformation:
         return self._step_count
 
     @property
-    def abscissa_from_value(self) -> float:
-        return self._abscissa_from_value
+    def abscissa_left_value(self) -> float:
+        return self._abscissa_left_value
 
     @property
-    def abscissa_to_value(self) -> float:
-        return self._abscissa_to_value
+    def abscissa_right_value(self) -> float:
+        return self._abscissa_right_value
+    
+    @property
+    def abscissa_ascending(self) -> bool:
+        return self._abscissa_ascending
 
-    def step_length(self, step_index: int) -> int:
-        return self._step_lengths[step_index]
-
-    def step_abscissa_from_value(self, step_index: int) -> float:
+    def step_abscissa_left_value(self, step_index: int) -> float:
         return self._abscissa_value_ranges[step_index][0]
 
-    def step_abscissa_to_value(self, step_index: int) -> float:
+    def step_abscissa_right_value(self, step_index: int) -> float:
         return self._abscissa_value_ranges[step_index][1]
 
 
@@ -112,12 +113,12 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
     # check this is a stepped analysis
     if not stepped:
         # not a stepped analysis — return a single step covering the entire abscissa range with no parameter values
-        return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], step_lengths=[num_points], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
+        return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
     # parameter expressions
     parameters = [expr for expr in expressions if expr.variable_type == "parameter"]
     if len(parameters) == 0:
         # treat as unstepped
-        return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], step_lengths=[num_points], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
+        return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
     # stack all parameter values into a matrix (num_points, num_parameters)
     stacked = np.column_stack([expression.data for expression in parameters]) if len(parameters) > 1 else parameters[0].data.reshape(-1, 1)
     # detect changes in parameter values (N - 1, )
@@ -136,12 +137,8 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
     abscissa_indices = [slice(s, e) for s, e in zip(starts_list, ends_list)]
     # per-step abscissa value ranges in display space
     abscissa_value_ranges = [(float(abscissa.data[step_slice.start]), float(abscissa.data[step_slice.stop - 1])) for step_slice in abscissa_indices]
-    # step lengths
-    step_lengths = [e - s for e, s in zip(ends_list, starts_list)]
-    # log step information
-    logger.debug("Detected %d steps in data, step lengths: %s", len(starts), step_lengths)
     # create step information object
-    return StepInformation(keys=[expression.name for expression in parameters], values=values, abscissa_indices=abscissa_indices, step_lengths=step_lengths, abscissa_value_ranges=abscissa_value_ranges)
+    return StepInformation(keys=[expression.name for expression in parameters], values=values, abscissa_indices=abscissa_indices, abscissa_value_ranges=abscissa_value_ranges)
 
 
 def _process_scale(abscissa: Expression, scale: AbscissaScale) -> Expression:

@@ -777,12 +777,12 @@ class TestProcessSteps(TestCase):
         # act
         result = _process_steps(stepped, expressions, abscissa, num_points)
         # assert
-        self.assertEqual(result.step_abscissa_from_value(0), 10.0)
-        self.assertEqual(result.step_abscissa_to_value(0), 30.0)
-        self.assertEqual(result.step_abscissa_from_value(1), 9.0)
-        self.assertEqual(result.step_abscissa_to_value(1), 998.0)
-        self.assertEqual(result.step_abscissa_from_value(2), 11.0)
-        self.assertEqual(result.step_abscissa_to_value(2), 1001.0)
+        self.assertEqual(result.step_abscissa_left_value(0), 10.0)
+        self.assertEqual(result.step_abscissa_right_value(0), 30.0)
+        self.assertEqual(result.step_abscissa_left_value(1), 9.0)
+        self.assertEqual(result.step_abscissa_right_value(1), 998.0)
+        self.assertEqual(result.step_abscissa_left_value(2), 11.0)
+        self.assertEqual(result.step_abscissa_right_value(2), 1001.0)
 
     def test_step_information_stores_global_abscissa_value_bounds(self):
         # arrange
@@ -796,8 +796,8 @@ class TestProcessSteps(TestCase):
         # act
         result = _process_steps(stepped, expressions, abscissa, num_points)
         # assert
-        self.assertEqual(result.abscissa_from_value, 9.0)
-        self.assertEqual(result.abscissa_to_value, 1001.0)
+        self.assertEqual(result.abscissa_left_value, 9.0)
+        self.assertEqual(result.abscissa_right_value, 1001.0)
 
     def test_all_points_covered_by_slices(self):
         # arrange

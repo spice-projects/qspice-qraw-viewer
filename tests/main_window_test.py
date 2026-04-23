@@ -480,14 +480,12 @@ class TestMainWindowSlots(TestCase):
         win._last_status_time = 0.0
         win.statusBar = MagicMock(return_value=MagicMock())
         chart = MagicMock()
-        chart.sample_index_at_ratio.return_value = 7
-        chart.sample_at.return_value = [("V(out)", "V", [1.23])]
+        chart.ordinate_values_at_abscissa_value.return_value = [("V(out)", "V", [1.23])]
         win._charts = [chart]
         # act
         win._on_pointer_moved(0, 0.35)
         # assert
-        chart.sample_index_at_ratio.assert_called_once_with(0.35)
-        chart.sample_at.assert_called_once_with(0.35)
+        chart.ordinate_values_at_abscissa_value.assert_called_once_with(0.35)
 
     def test_pointer_moved_ignores_invalid_chart_index(self):
         # arrange
@@ -499,8 +497,7 @@ class TestMainWindowSlots(TestCase):
         # act
         win._on_pointer_moved(99, 0.5)
         # assert
-        chart.sample_index_at_ratio.assert_not_called()
-        chart.sample_at.assert_not_called()
+        chart.ordinate_values_at_abscissa_value.assert_not_called()
 
     def test_pointer_moved_updates_status_bar_message(self):
         # arrange
@@ -512,8 +509,7 @@ class TestMainWindowSlots(TestCase):
         status_bar = MagicMock()
         win.statusBar = MagicMock(return_value=status_bar)
         chart = MagicMock()
-        chart.sample_index_at_ratio.return_value = 5
-        chart.sample_at.return_value = [("V(out)", "V", [1.0])]
+        chart.ordinate_values_at_abscissa_value.return_value = [("V(out)", "V", [1.0])]
         win._charts = [chart]
         # act
         win._on_pointer_moved(0, 0.2)
