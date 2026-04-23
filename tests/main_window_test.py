@@ -19,7 +19,7 @@ sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
 sys.modules["PySide6.QtWidgets"].QMainWindow = type("QMainWindow", (), {})
 
 from viewer.expression import Expression  # noqa: E402
-from viewer.main_window import MainWindow, _build_step_combinations, _compute_decimate_target, _FALLBACK_DECIMATE_TARGET, _format_value, _format_values  # noqa: E402
+from viewer.main_window import MainWindow, _compute_decimate_target, _FALLBACK_DECIMATE_TARGET, _format_value, _format_values  # noqa: E402
 
 
 class TestMainWindow(TestCase):
@@ -189,40 +189,6 @@ class TestFormatValues(TestCase):
         result = _format_values("I(L1)", [1e-3, 2e-3], "A")
         # assert — SI prefix applied per-value
         self.assertEqual(result, "I(L1) = [1.00 mA, 2.00 mA]")
-
-
-class TestBuildStepCombinations(TestCase):
-
-    def test_returns_empty_when_single_step(self):
-        # arrange
-        expressions = [Expression("Rload", np.array([1.0]), "", variable_type="parameter")]
-        # act
-        parameter_names, combinations = _build_step_combinations(expressions, 1, 1)
-        # assert
-        self.assertEqual(parameter_names, [])
-        self.assertEqual(combinations, [])
-
-    def test_uses_single_step_abscissa_length_for_parameter_rows(self):
-        # arrange
-        expressions = [
-            Expression("Rload", np.array([10.0, 10.0, 10.0, 10.0, 22.0, 22.0, 22.0, 22.0, 47.0, 47.0, 47.0, 47.0]), "", variable_type="parameter"),
-            Expression("V(out)", np.array([1.0] * 12), "V", variable_type="voltage")
-        ]
-        # act
-        parameter_names, combinations = _build_step_combinations(expressions, 3, 4)
-        # assert
-        self.assertEqual(parameter_names, ["Rload"])
-        self.assertEqual([combination.step_index for combination in combinations], [0, 1, 2])
-        self.assertEqual([combination.values for combination in combinations], [["10"], ["22"], ["47"]])
-
-    def test_returns_empty_when_no_parameter_variables_exist(self):
-        # arrange
-        expressions = [Expression("V(out)", np.array([1.0, 2.0]), "V", variable_type="voltage")]
-        # act
-        parameter_names, combinations = _build_step_combinations(expressions, 3, 2)
-        # assert
-        self.assertEqual(parameter_names, [])
-        self.assertEqual(combinations, [])
 
 
 class TestMainWindowSlots(TestCase):

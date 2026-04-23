@@ -582,7 +582,7 @@ class MainWindow(QMainWindow):
         # chart at index
         chart = self._charts[chart_index]
         # retrieve the stored abscissa value (may be in log space for decade/octave scales)
-        x_stored = chart.ratio_to_abscissa_value(x_ratio)
+        x_stored = chart.abscissa_value_at_cursor(x_ratio)
         # convert stored value back to physical abscissa value
         if self._abscissa_scale == AbscissaScale.DECADE:
             x_actual = 10 ** x_stored

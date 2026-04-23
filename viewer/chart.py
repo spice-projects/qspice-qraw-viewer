@@ -172,8 +172,8 @@ class Chart:
         # current zoom window in abscissa values, None if not set
         x_left_ratio, _, x_right_ratio, _ = self._zoom_window
         # x0 and x1
-        abscissa_left_value = self.ratio_to_abscissa_value(x_left_ratio) if x_left_ratio is not None else self._step_information.abscissa_left_value
-        abscissa_right_value = self.ratio_to_abscissa_value(x_right_ratio) if x_right_ratio is not None else self._step_information.abscissa_right_value
+        abscissa_left_value = self._ratio_to_abscissa_value(x_left_ratio) if x_left_ratio is not None else self._step_information.abscissa_left_value
+        abscissa_right_value = self._ratio_to_abscissa_value(x_right_ratio) if x_right_ratio is not None else self._step_information.abscissa_right_value
         # loop expressions that should be plotted
         for ordinate in expressions:
             # lookup ordinate in series
@@ -406,9 +406,19 @@ class Chart:
         # exit
         return result
     
-    def ratio_to_abscissa_value(self, x_ratio: float) -> float:
+    def _ratio_to_abscissa_value(self, x_ratio: float) -> float:
         # make sure ratio is between 0 and 1
         percentage = max(0.0, min(1.0, x_ratio))
+        # convert to abscissa value
+        return self._step_information.abscissa_left_value + percentage * (self._step_information.abscissa_right_value - self._step_information.abscissa_left_value)
+    
+    def abscissa_value_at_cursor(self, cursor: float) -> float:
+        # make sure cursor is between 0 and 1
+        percentage = max(0.0, min(1.0, cursor))
+        # apply zoom window if it exists
+        if self._zoom_window[0] is not None and self._zoom_window[2] is not None:
+            # recalculate percentage based on zoom window
+            percentage = self._zoom_window[0] + percentage * (self._zoom_window[2] - self._zoom_window[0])
         # convert to abscissa value
         return self._step_information.abscissa_left_value + percentage * (self._step_information.abscissa_right_value - self._step_information.abscissa_left_value)
 
@@ -449,8 +459,8 @@ class Chart:
         # current zoom window in abscissa values, None if not set
         x_left_ratio, _, x_right_ratio, _ = self._zoom_window
         # x0 and x1
-        abscissa_left_value = self.ratio_to_abscissa_value(x_left_ratio) if x_left_ratio is not None else self._step_information.abscissa_left_value
-        abscissa_right_value = self.ratio_to_abscissa_value(x_right_ratio) if x_right_ratio is not None else self._step_information.abscissa_right_value
+        abscissa_left_value = self._ratio_to_abscissa_value(x_left_ratio) if x_left_ratio is not None else self._step_information.abscissa_left_value
+        abscissa_right_value = self._ratio_to_abscissa_value(x_right_ratio) if x_right_ratio is not None else self._step_information.abscissa_right_value
         try:
             # loop existing series
             for _, (_, ordinate_series) in self._series.items():

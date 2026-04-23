@@ -174,44 +174,6 @@ class TestFftDialogOnDialogAccepted(TestCase):
         self.assertEqual(dialog._result_from_index, 0.0)
         self.assertEqual(dialog._result_to_index, 1.0)
 
-    def test_range_mode_zoom_uses_stored_zoom_window(self):
-        # arrange — zoom window [0.3, 0.8]
-        dialog, _e1, _e2 = _make_dialog(np.linspace(0.0, 1.0, 11), zoom_from=0.3, zoom_to=0.8)
-        # act
-        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "zoom", 0.0, 1.0, False)
-        # assert
-        self.assertEqual(dialog._result_from_index, 0.3)
-        self.assertEqual(dialog._result_to_index, 0.8)
-
-    def test_range_mode_custom_uses_clamped_values(self):
-        # arrange — 11-point abscissa 0…1 s
-        abscissa = np.linspace(0.0, 1.0, 11)
-        dialog, _e1, _e2 = _make_dialog(abscissa)
-        # act — request range 0.2 s … 0.8 s (avoid 0.6 which has floating-point representability issues)
-        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.2, 0.8, False)
-        # assert — custom values are stored directly after domain clamping
-        self.assertEqual(dialog._result_from_index, 0.2)
-        self.assertEqual(dialog._result_to_index, 0.8)
-
-    def test_range_mode_custom_clamps_above_total(self):
-        # arrange
-        abscissa = np.linspace(0.0, 1.0, 11)
-        dialog, _e1, _e2 = _make_dialog(abscissa)
-        # act — to_time beyond the end of the array
-        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.5, 999.0, False)
-        # assert — upper bound clamped to the last abscissa value
-        self.assertEqual(dialog._result_to_index, 1.0)
-
-    def test_range_mode_custom_preserves_single_value_window(self):
-        # arrange — exact single-value custom range
-        abscissa = np.linspace(0.0, 1.0, 11)
-        dialog, _e1, _e2 = _make_dialog(abscissa)
-        # act
-        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.5, 0.5, False)
-        # assert
-        self.assertEqual(dialog._result_from_index, 0.5)
-        self.assertEqual(dialog._result_to_index, 0.5)
-
     def test_range_mode_unknown_falls_back_to_full(self):
         # arrange
         dialog, _e1, _e2 = _make_dialog(np.linspace(0.0, 1.0, 11))

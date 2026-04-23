@@ -77,7 +77,7 @@ class TestStepToolDialog(TestCase):
         StepToolDialog.__init__.__globals__["QUrl"] = MagicMock(fromLocalFile=lambda value: value)
         StepToolDialog.__init__.__globals__["QColor"] = lambda value: value
         StepToolDialog.__init__.__globals__["Qt"] = MagicMock(WindowModality=MagicMock(WindowModal=object()))
-        step_information = StepInformation(keys=["temp", "vdd"], values=[(25, 1.8), (100, 3.3)], indices=[slice(0, 2), slice(2, 4)])
+        step_information = StepInformation(keys=["temp", "vdd"], values=[(25, 1.8), (100, 3.3)], abscissa_indices=[slice(0, 2), slice(2, 4)], abscissa_value_ranges=[(0.0, 1.0), (1.0, 2.0)])
         # act
         dialog = StepToolDialog(parent=MagicMock(), step_information=step_information, selected_steps={3, 1})
         # assert
