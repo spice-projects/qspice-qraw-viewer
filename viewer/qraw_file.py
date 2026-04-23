@@ -68,11 +68,19 @@ class StepInformation:
         self._values = values
         self._abscissa_indices = abscissa_indices
         self._abscissa_value_ranges = abscissa_value_ranges
-        # calculated values for quick lookup
+        # number of steps
         self._step_count = len(abscissa_indices)
-        self._abscissa_left_value = min((min(value_range) for value_range in self._abscissa_value_ranges), default=0.0)
-        self._abscissa_right_value = max((max(value_range) for value_range in self._abscissa_value_ranges), default=0.0)
-        self._abscissa_ascending = self._abscissa_left_value <= self._abscissa_right_value
+        # determine if abscissa is ascending or descending based on the first step's abscissa value range
+        self._abscissa_ascending = self._abscissa_value_ranges[0][0] <= self._abscissa_value_ranges[0][1] if len(self._abscissa_value_ranges) > 0 else True
+        # check abscissa direction
+        if self._abscissa_ascending:
+            # left and right values
+            self._abscissa_left_value = float(min((value_range[0] for value_range in self._abscissa_value_ranges), default=0.0))
+            self._abscissa_right_value = float(max((value_range[1] for value_range in self._abscissa_value_ranges), default=0.0))
+        else:
+            # left and right values
+            self._abscissa_left_value = float(max((value_range[0] for value_range in self._abscissa_value_ranges), default=0.0))
+            self._abscissa_right_value = float(min((value_range[1] for value_range in self._abscissa_value_ranges), default=0.0))
 
     @property
     def keys(self) -> list[str]:

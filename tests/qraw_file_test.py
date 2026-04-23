@@ -545,7 +545,7 @@ class TestProcessSteps(TestCase):
         # assert
         self.assertEqual(result.length, 1)
         self.assertEqual(result.abscissa_indices[0], slice(0, 3))
-        self.assertEqual(result.step_length(0), 3)
+        self.assertEqual(result.abscissa_indices[0].stop - result.abscissa_indices[0].start, 3)
         self.assertEqual(result.keys, [])
         self.assertEqual(result.values, [])
 
@@ -560,7 +560,7 @@ class TestProcessSteps(TestCase):
         # assert
         self.assertEqual(result.length, 1)
         self.assertEqual(result.abscissa_indices[0], slice(0, 3))
-        self.assertEqual(result.step_length(0), 3)
+        self.assertEqual(result.abscissa_indices[0].stop - result.abscissa_indices[0].start, 3)
         self.assertEqual(result.keys, [])
         self.assertEqual(result.values, [])
 
@@ -580,8 +580,8 @@ class TestProcessSteps(TestCase):
         self.assertEqual(result.values, [(1.0,), (2.0,)])
         self.assertEqual(result.abscissa_indices[0], slice(0, 3))
         self.assertEqual(result.abscissa_indices[1], slice(3, 6))
-        self.assertEqual(result.step_length(0), 3)
-        self.assertEqual(result.step_length(1), 3)
+        self.assertEqual(result.abscissa_indices[0].stop - result.abscissa_indices[0].start, 3)
+        self.assertEqual(result.abscissa_indices[1].stop - result.abscissa_indices[1].start, 3)
 
     def test_stepped_single_parameter_three_steps(self):
         # arrange
@@ -597,9 +597,9 @@ class TestProcessSteps(TestCase):
         self.assertEqual(result.length, 3)
         self.assertEqual(result.keys, ["R1"])
         self.assertEqual(result.values, [(1.0,), (2.0,), (3.0,)])
-        self.assertEqual(result.step_length(0), 2)
-        self.assertEqual(result.step_length(1), 2)
-        self.assertEqual(result.step_length(2), 2)
+        self.assertEqual(result.abscissa_indices[0].stop - result.abscissa_indices[0].start, 2)
+        self.assertEqual(result.abscissa_indices[1].stop - result.abscissa_indices[1].start, 2)
+        self.assertEqual(result.abscissa_indices[2].stop - result.abscissa_indices[2].start, 2)
 
     def test_stepped_multiple_parameters_two_steps(self):
         # arrange
@@ -632,8 +632,8 @@ class TestProcessSteps(TestCase):
         result = _process_steps(stepped, expressions, expr_voltage, num_points)
         # assert
         self.assertEqual(result.length, 2)
-        self.assertEqual(result.step_length(0), 2)
-        self.assertEqual(result.step_length(1), 4)
+        self.assertEqual(result.abscissa_indices[0].stop - result.abscissa_indices[0].start, 2)
+        self.assertEqual(result.abscissa_indices[1].stop - result.abscissa_indices[1].start, 4)
         self.assertEqual(result.values, [(1.0, 10.0), (2.0, 20.0)])
 
     def test_parameter_values_extracted_at_step_start(self):
@@ -662,9 +662,9 @@ class TestProcessSteps(TestCase):
         result = _process_steps(stepped, expressions, expr_voltage, num_points)
         # assert
         self.assertEqual(result.length, 3)
-        self.assertEqual(result.step_length(0), 1)
-        self.assertEqual(result.step_length(1), 1)
-        self.assertEqual(result.step_length(2), 1)
+        self.assertEqual(result.abscissa_indices[0].stop - result.abscissa_indices[0].start, 1)
+        self.assertEqual(result.abscissa_indices[1].stop - result.abscissa_indices[1].start, 1)
+        self.assertEqual(result.abscissa_indices[2].stop - result.abscissa_indices[2].start, 1)
 
     def test_large_number_of_steps(self):
         # arrange
@@ -679,7 +679,8 @@ class TestProcessSteps(TestCase):
         # assert
         self.assertEqual(result.length, 20)
         for i in range(20):
-            self.assertEqual(result.step_length(i), 5)
+            step_slice = result.abscissa_indices[i]
+            self.assertEqual(step_slice.stop - step_slice.start, 5)
 
     def test_keys_match_parameter_names(self):
         # arrange
@@ -725,7 +726,7 @@ class TestProcessSteps(TestCase):
         # act
         result = _process_steps(stepped, expressions, expr_voltage, num_points)
         # assert
-        total_length = sum(result.step_length(i) for i in range(result.length))
+        total_length = sum(step_slice.stop - step_slice.start for step_slice in result.abscissa_indices)
         self.assertEqual(total_length, num_points)
 
     def test_step_information_uses_primitive_types_for_lengths_and_slices(self):
@@ -744,7 +745,7 @@ class TestProcessSteps(TestCase):
             step_slice = result.abscissa_indices[i]
             self.assertIsInstance(step_slice.start, int)
             self.assertIsInstance(step_slice.stop, int)
-            self.assertIsInstance(result.step_length(i), int)
+            self.assertIsInstance(step_slice.stop - step_slice.start, int)
 
     def test_step_information_values_tuples_use_python_primitives(self):
         # arrange
@@ -784,7 +785,7 @@ class TestProcessSteps(TestCase):
         self.assertEqual(result.step_abscissa_left_value(2), 11.0)
         self.assertEqual(result.step_abscissa_right_value(2), 1001.0)
 
-    def test_step_information_stores_global_abscissa_value_bounds(self):
+    def test_step_information_stores_global_abscissa_axis_sides(self):
         # arrange
         stepped = True
         abscissa = Expression("Time", np.array([10.0, 20.0, 30.0, 9.0, 100.0, 998.0, 11.0, 501.0, 1001.0]), "s", variable_type="time")
@@ -798,6 +799,49 @@ class TestProcessSteps(TestCase):
         # assert
         self.assertEqual(result.abscissa_left_value, 9.0)
         self.assertEqual(result.abscissa_right_value, 1001.0)
+
+    def test_step_information_stores_descending_abscissa_axis_sides(self):
+        # arrange
+        stepped = True
+        abscissa = Expression("Frequency", np.array([100.0, 10.0, 1.0, 200.0, 20.0, 2.0]), "Hz", variable_type="frequency")
+        param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+        expr_param = Expression("Step", param_data, "", variable_type="parameter")
+        expr_gain = Expression("V(out)", np.arange(6, dtype=float), "V", variable_type="voltage")
+        expressions = [expr_gain, expr_param]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, abscissa, num_points)
+        # assert
+        self.assertEqual(result.abscissa_left_value, 200.0)
+        self.assertEqual(result.abscissa_right_value, 1.0)
+
+    def test_step_information_marks_descending_abscissa_orientation(self):
+        # arrange
+        stepped = True
+        abscissa = Expression("Frequency", np.array([100.0, 10.0, 1.0, 200.0, 20.0, 2.0]), "Hz", variable_type="frequency")
+        param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+        expr_param = Expression("Step", param_data, "", variable_type="parameter")
+        expr_gain = Expression("V(out)", np.arange(6, dtype=float), "V", variable_type="voltage")
+        expressions = [expr_gain, expr_param]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, abscissa, num_points)
+        # assert
+        self.assertFalse(result.abscissa_ascending)
+
+    def test_step_information_marks_ascending_abscissa_orientation(self):
+        # arrange
+        stepped = True
+        abscissa = Expression("Frequency", np.array([1.0, 10.0, 100.0, 2.0, 20.0, 200.0]), "Hz", variable_type="frequency")
+        param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+        expr_param = Expression("Step", param_data, "", variable_type="parameter")
+        expr_gain = Expression("V(out)", np.arange(6, dtype=float), "V", variable_type="voltage")
+        expressions = [expr_gain, expr_param]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, abscissa, num_points)
+        # assert
+        self.assertTrue(result.abscissa_ascending)
 
     def test_all_points_covered_by_slices(self):
         # arrange
