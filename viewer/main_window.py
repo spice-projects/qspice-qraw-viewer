@@ -6,9 +6,10 @@ import numpy as np
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
 from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QKeySequence
 from PySide6.QtQuick import QQuickView
-from PySide6.QtWidgets import QMainWindow, QWidget
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
 
 from .add_plot_dialog import AddPlotDialog
+from .app_open import open_qraw_as_window
 from .chart import Chart
 from .expression import Expression
 from .expression_manager import ExpressionManager
@@ -38,6 +39,9 @@ _MIN_STATUS_INTERVAL = 1.0 / 30
 # application-level registry keeps child windows alive independently
 # of the source main window that created them
 _CHILD_WINDOWS: set[QMainWindow] = set()
+
+# application-level open-file dialog lock prevents stacked dialogs
+_OPEN_FILE_DIALOG_ACTIVE = False
 
 
 def _register_child_window(window: QMainWindow) -> None:
@@ -202,6 +206,13 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu("&File")
+
+        # File | Open
+        open_action = QAction("Open...", self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.triggered.connect(self._on_menu_open_file)
+        file_menu.addAction(open_action)
+
         # File | Quit
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence.Quit)
@@ -422,6 +433,31 @@ class MainWindow(QMainWindow):
         logger.debug("User requested opening a new window")
         # create a new independent main window sharing the same source data and path
         new_window = MainWindow(self._qraw_file, source_qraw_path=self._qraw_path, start_empty=True)
+        # keep reference alive independently of the source main window
+        _register_child_window(new_window)
+        # show the new window
+        new_window.show()
+
+    @Slot()
+    def _on_menu_open_file(self) -> None:
+        # use application-level lock so only one open-file dialog can exist at a time
+        global _OPEN_FILE_DIALOG_ACTIVE
+        if _OPEN_FILE_DIALOG_ACTIVE:
+            return
+        _OPEN_FILE_DIALOG_ACTIVE = True
+        # prompt for a file
+        try:
+            input_path, _ = QFileDialog.getOpenFileName(self, "Open QRAW File", "", "QRAW Files (*.qraw);;All Files (*)")
+        finally:
+            _OPEN_FILE_DIALOG_ACTIVE = False
+        # exit when the user cancels the dialog
+        if not input_path:
+            return
+        # load file and create a new main window through shared open path
+        new_window = open_qraw_as_window(input_path, lambda qraw_file: MainWindow(qraw_file))
+        # exit when the file fails to load
+        if new_window is None:
+            return
         # keep reference alive independently of the source main window
         _register_child_window(new_window)
         # show the new window
