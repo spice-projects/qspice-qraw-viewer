@@ -6,6 +6,8 @@ from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
+from .qraw_file import StepInformation
+
 logger = logging.getLogger(__name__)
 
 _QML_FILE = Path(__file__).parent / "step_tool_dialog.qml"
@@ -14,15 +16,23 @@ _BG = "#1a1b1e"
 
 class StepToolDialog(QDialog):
 
-    def __init__(self, parameter_names: list[str], step_rows: list[dict[str, object]], selected_steps: list[int], parent=None):
+    def __init__(self, parent: QWidget, step_information: StepInformation, selected_steps: set[int]):
         super().__init__(parent)
-        # store the selected steps set while user edits the table
-        self._selected_steps: set[int] = set(selected_steps)
+        # parameter names from stepped simulation metadata
+        parameter_names = list(step_information.keys)
+        # tabular rows consumed by QML
+        step_rows = []
+        # build one row per step with display-ready string values
+        for step_index, row_values in enumerate(step_information.values):
+            # append row payload
+            step_rows.append({"stepIndex": step_index, "values": [str(value) for value in row_values]})
+        # store selected steps
+        self._selected_steps: set[int] = selected_steps
         # context properties consumed by QML
         self._ctx_properties = {
             "parameterNames": parameter_names,
             "stepRows": step_rows,
-            "initialSelectedSteps": selected_steps,
+            "initialSelectedSteps": sorted(selected_steps),
         }
         # window setup
         self.setWindowTitle("Step Tool")
@@ -76,5 +86,5 @@ class StepToolDialog(QDialog):
         self.accept()
 
     @property
-    def selected_steps(self) -> list[int]:
+    def selected_steps(self) -> set[int]:
         return self._selected_steps

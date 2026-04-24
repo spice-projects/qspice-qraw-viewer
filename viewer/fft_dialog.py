@@ -1,14 +1,13 @@
 import logging
 from pathlib import Path
 
-import numpy as np
 from PySide6.QtCore import Qt, QUrl, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
 from .expression import Expression
-from .fft import FftOutput, WindowFunction, ZeroPadding, fft_frequency_range
+from .fft import FftOutput, WindowFunction, ZeroPadding
 
 logger = logging.getLogger(__name__)
 
@@ -19,32 +18,28 @@ _BG = "#1a1b1e"
 class FftDialog(QDialog):
     """Dialog for configuring and launching an FFT computation.
 
-    The dialog exposes a QML UI that lets the user choose expressions, data
-    range, window function, zero-padding, normalisation and output format.
-    After acceptance the result properties hold the user's selections.
+    Presents a QML UI for selecting FFT parameters: expressions, data range, window, zero-padding, normalization, output type, and DC option. After acceptance, result properties reflect the user's selections.
 
-    Parameters
-    ----------
-    expressions      : ordinate expressions available for FFT (abscissa excluded).
-    abscissa         : time-domain abscissa expression.
-    zoom_from_index  : left edge of the current visible zoom window (sample index).
-    zoom_to_index    : right edge of the current visible zoom window (sample index).
-    parent           : optional parent widget.
+    Parameters:
+        parent: QWidget — parent widget
+        expressions: list[Expression] — ordinate expressions for FFT
+        min_abscissa_value: float — minimum abscissa value
+        max_abscissa_value: float — maximum abscissa value
+        min_abscissa_value_zoomed: float — minimum abscissa value in zoom window
+        max_abscissa_value_zoomed: float — maximum abscissa value in zoom window
     """
 
-    def __init__(self, expressions: list[Expression], abscissa: Expression, zoom_from_index: int, zoom_to_index: int, parent=None):
+    def __init__(self, parent: QWidget, expressions: list[Expression], min_abscissa_value: float, max_abscissa_value: float, min_abscissa_value_zoomed: float, max_abscissa_value_zoomed: float):
+        """Initialize the FFT dialog and set up the QML UI. All expressions are pre-selected by default."""
         super().__init__(parent)
         # store references
         self._expressions = expressions
-        self._abscissa = abscissa
-        self._zoom_from_index = zoom_from_index
-        self._zoom_to_index = zoom_to_index
         # selected expressions tracked via selectionChanged signal; all pre-selected
         self._selected_expressions: set[Expression] = set(expressions)
         # result fields populated when the dialog is accepted
         self._result_expressions: list[Expression] = []
-        self._result_from_index: int = 0
-        self._result_to_index: int = len(abscissa.data)
+        self._result_from_index: float = float(min_abscissa_value)
+        self._result_to_index: float = float(max_abscissa_value)
         self._result_window: WindowFunction = WindowFunction.HANNING
         self._result_zero_pad: ZeroPadding = ZeroPadding.NONE
         self._result_normalize: bool = False
@@ -55,21 +50,15 @@ class FftDialog(QDialog):
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(480, 650)
         self.setMinimumHeight(650)
-        # compute frequency-range preview from the full abscissa
-        abscissa_values = abscissa.data
-        df, f_nyquist = fft_frequency_range(abscissa_values)
         # expose data to QML via context properties
-        # build the initial property values for the QML root object
         self._ctx_properties = {
             "windowFunctions": [w.value for w in WindowFunction],
             "outputTypes": [o.value for o in FftOutput],
             "zeroPaddingOptions": [z.value for z in ZeroPadding],
-            "freqRangePreview": f"0 Hz – {f_nyquist:.4g} Hz (Nyquist)",
-            "binWidthPreview": f"{df:.4g} Hz / bin",
-            "abscissaMin": float(abscissa_values[0]),
-            "abscissaMax": float(abscissa_values[-1]),
-            "zoomFromTime": float(abscissa_values[min(zoom_from_index, len(abscissa_values) - 1)]),
-            "zoomToTime": float(abscissa_values[min(zoom_to_index, len(abscissa_values)) - 1]),
+            "abscissaMin": min_abscissa_value,
+            "abscissaMax": max_abscissa_value,
+            "zoomFromTime": min_abscissa_value_zoomed,
+            "zoomToTime": max_abscissa_value_zoomed,
             "defaultWindowIndex": [w.value for w in WindowFunction].index(WindowFunction.HANNING.value),
         }
         # create QML view
@@ -86,6 +75,7 @@ class FftDialog(QDialog):
 
     @Slot(QQuickView.Status)
     def _on_qml_ready(self, status: QQuickView.Status):
+        """Inject context properties and connect QML signals after QML is ready."""
         # only proceed once QML has finished loading successfully
         if status != QQuickView.Status.Ready:
             return
@@ -102,6 +92,7 @@ class FftDialog(QDialog):
 
     @Slot(str, bool)
     def _on_expression_selection_changed(self, name: str, selected: bool):
+        """Update selected expressions when user toggles an expression in the QML UI."""
         # find the matching expression and toggle it in the selected set
         expression = next((e for e in self._expressions if e.name == name), None)
         if expression is None:
@@ -113,28 +104,31 @@ class FftDialog(QDialog):
 
     @Slot(str, str, str, bool, str, float, float, bool)
     def _on_dialog_accepted(self, window_fn: str, zero_pad: str, output: str, normalize: bool, range_mode: str, custom_from: float, custom_to: float, keep_dc: bool):
+        """Validate selection, store result properties, and close the dialog when accepted from QML UI."""
         # reject if no expressions are selected
         if not self._selected_expressions:
             # log warning and reject dialog when no expressions are selected
             logger.warning("FFT dialog accepted with no expressions selected")
+            # reject dialog
             self.reject()
+            # exit
             return
         # store resolved expressions preserving their original list order
         self._result_expressions = [e for e in self._expressions if e in self._selected_expressions]
-        # window function
         try:
+            # window function
             self._result_window = WindowFunction(window_fn)
         except ValueError:
             # fall back to rectangular when the value is unrecognised
             self._result_window = WindowFunction.RECTANGULAR
-        # zero-padding
         try:
+            # zero-padding
             self._result_zero_pad = ZeroPadding(zero_pad)
         except ValueError:
             # fall back to no padding when the value is unrecognised
             self._result_zero_pad = ZeroPadding.NONE
-        # output type
         try:
+            # output type
             self._result_output = FftOutput(output)
         except ValueError:
             # fall back to magnitude when the value is unrecognised
@@ -143,56 +137,45 @@ class FftDialog(QDialog):
         self._result_normalize = normalize
         # keep dc flag
         self._result_keep_dc = keep_dc
-        # data range
-        abscissa_values = self._abscissa.data
-        # total number of abscissa samples
-        total = len(abscissa_values)
-        if range_mode == "zoom":
-            # use the current visible zoom window
-            self._result_from_index = self._zoom_from_index
-            self._result_to_index = self._zoom_to_index
-        elif range_mode == "custom":
-            # map user-supplied time values to nearest sample indices
-            from_idx = int(np.searchsorted(abscissa_values, custom_from))
-            to_idx = int(np.searchsorted(abscissa_values, custom_to, side="right"))
-            # clamp to valid range ensuring at least 2 samples
-            self._result_from_index = max(0, min(from_idx, total - 2))
-            self._result_to_index = max(self._result_from_index + 2, min(to_idx, total))
-        else:
-            # use the full abscissa range
-            self._result_from_index = 0
-            self._result_to_index = total
         # proceed to accept the dialog and close it
         self.accept()
 
     @property
     def result_expressions(self) -> list[Expression]:
+        """List of expressions selected for FFT (original order)."""
         return self._result_expressions
 
     @property
-    def result_from_index(self) -> int:
+    def result_from_index(self) -> float:
+        """Left edge of the selected abscissa range."""
         return self._result_from_index
 
     @property
-    def result_to_index(self) -> int:
+    def result_to_index(self) -> float:
+        """Right edge of the selected abscissa range."""
         return self._result_to_index
 
     @property
     def result_window(self) -> WindowFunction:
+        """Selected window function for FFT."""
         return self._result_window
 
     @property
     def result_zero_pad(self) -> ZeroPadding:
+        """Selected zero-padding option for FFT."""
         return self._result_zero_pad
 
     @property
     def result_normalize(self) -> bool:
+        """Whether normalization is enabled for FFT output."""
         return self._result_normalize
 
     @property
     def result_keep_dc(self) -> bool:
+        """Whether to keep the DC component in FFT output."""
         return self._result_keep_dc
 
     @property
     def result_output(self) -> FftOutput:
+        """Selected FFT output type (e.g., magnitude, phase)."""
         return self._result_output

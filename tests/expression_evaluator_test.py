@@ -468,6 +468,28 @@ class TestExpressionEvaluator(TestCase):
         # 1e-05 (dimensionless) × mho (S) → S; S × V → A
         self.assertEqual(result.unit, "A")
 
+    def test_evaluate_seconds_constant(self):
+        # arrange — built-in time constant from _CONSTANTS: s = 1 second
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        tree = parser.parse("s")
+        # act
+        result = evaluator.evaluate(tree, {})
+        # assert
+        self.assertAlmostEqual(float(result.data), 1.0)
+        self.assertEqual(result.unit, "s")
+
+    def test_evaluate_division_by_seconds_constant_gives_hz(self):
+        # arrange — 1 / s → Hz using the built-in seconds constant
+        parser = ExpressionParser()
+        evaluator = ExpressionEvaluator()
+        tree = parser.parse("1/s")
+        # act
+        result = evaluator.evaluate(tree, {})
+        # assert
+        self.assertAlmostEqual(float(result.data), 1.0)
+        self.assertEqual(result.unit, "Hz")
+
     def test_evaluate_two_node_probe_differential(self):
         # arrange — V(a, b) = V(a) - V(b) when both single-node probes are in context;
         # models '.alias I(R) (Gmho*V(node_a,node_b))' from real QSPICE output

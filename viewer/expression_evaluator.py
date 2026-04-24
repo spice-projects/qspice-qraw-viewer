@@ -94,6 +94,7 @@ _TWO_ARG_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(([^,]+),\s*([^)]+)\)$")
 _CONSTANTS: dict[str, tuple[float, str]] = {
     "pi": (np.pi, ""),
     "mho": (1.0, "S"),
+    "s": (1.0, "s"),
 }
 
 
