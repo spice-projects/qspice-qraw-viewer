@@ -6,6 +6,7 @@ import warnings
 from PySide6.QtCore import QtMsgType, qInstallMessageHandler
 from PySide6.QtWidgets import QApplication, QFileDialog
 
+from viewer.app_open import open_qraw_as_window
 from viewer.main_window import load_app_icon, MainWindow
 from viewer.qraw_file import QRawFile
 
@@ -80,13 +81,11 @@ def main():
         # exit when the user cancels the dialog
         if not input_path:
             sys.exit(0)
-    # load and parse the QRAW file
-    qraw_file = QRawFile.load(input_path)
-    if qraw_file is None:
+    # load file and create the main window through shared open path
+    window = open_qraw_as_window(input_path, lambda qraw_file: MainWindow(qraw_file))
+    if window is None:
         # exit
         sys.exit(1)
-    # main window with the loaded QRAW file
-    window = MainWindow(qraw_file)
     # show the main window
     window.show()
     # enter the Qt application main loop

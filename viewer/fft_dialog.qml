@@ -11,8 +11,6 @@ Item {
     property var windowFunctions: []
     property var outputTypes: []
     property var zeroPaddingOptions: []
-    property string freqRangePreview: ""
-    property string binWidthPreview: ""
     property real abscissaMin: 0
     property real abscissaMax: 0
     property real zoomFromTime: 0
@@ -560,36 +558,6 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     onClicked: keepDcCheck.checked = !keepDcCheck.checked
-                }
-            }
-
-            // ---------------------------------------------------------------
-            // Section: Preview
-            // ---------------------------------------------------------------
-            Rectangle {
-                width: parent.width
-                implicitHeight: previewColumn.implicitHeight + 16
-                radius: 4
-                color: "#14151a"
-                border.color: "#2a2d35"
-                border.width: 1
-
-                Column {
-                    id: previewColumn
-                    anchors { fill: parent; margins: 8 }
-                    spacing: 4
-
-                    Row {
-                        spacing: 6
-                        Text { text: "Frequency range:"; color: "#7a8599"; font.pixelSize: 11; width: 110 }
-                        Text { text: root.freqRangePreview; color: "#b0b8c8"; font.pixelSize: 11 }
-                    }
-
-                    Row {
-                        spacing: 6
-                        Text { text: "Bin resolution:"; color: "#7a8599"; font.pixelSize: 11; width: 110 }
-                        Text { text: root.binWidthPreview; color: "#b0b8c8"; font.pixelSize: 11 }
-                    }
                 }
             }
         }

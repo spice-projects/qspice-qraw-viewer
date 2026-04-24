@@ -12,8 +12,7 @@ Item {
     property bool fftEnabled: false
     property bool stepToolEnabled: false
 
-    signal horizontalZoom(int chartIndex, real xLeftRatio, real xRightRatio, real zoomFactor)
-    signal verticalZoom(int chartIndex, real yTopRatio, real yBottomRatio)
+    signal zoomRegionSelected(int chartIndex, real x0Ratio, real y0Ratio, real x1Ratio, real y1Ratio)
     signal menuZoomToFit(int chartIndex)
     signal menuAutorange(int chartIndex)
     signal menuZoomAbscissaExtent(int chartIndex)
@@ -37,8 +36,7 @@ Item {
         property bool legendVisible: false
         readonly property real plotAreaWidth: graphsView.plotArea.width
 
-        signal horizontalZoom(real xLeftRatio, real xRightRatio, real zoomFactor)
-        signal verticalZoom(real yTopRatio, real yBottomRatio)
+        signal zoomRegionSelected(real x0Ratio, real y0Ratio, real x1Ratio, real y1Ratio)
         signal menuZoomToFit
         signal menuAutorange
         signal menuZoomAbscissaExtent
@@ -142,33 +140,33 @@ Item {
                 const absValue = Math.abs(value);
                 // giga
                 if (absValue >= 1e9)
-                    return (value / 1e9).toFixed(1) + "G" + unit;
+                    return (value / 1e9).toFixed(1) + " G" + unit;
                 // mega
                 if (absValue >= 1e6)
-                    return (value / 1e6).toFixed(1) + "M" + unit;
+                    return (value / 1e6).toFixed(1) + " M" + unit;
                 // kilo
                 if (absValue >= 1e3)
-                    return (value / 1e3).toFixed(1) + "k" + unit;
+                    return (value / 1e3).toFixed(1) + " k" + unit;
                 // base unit
                 if (absValue >= 1.0)
-                    return value.toFixed(1) + unit;
+                    return value.toFixed(1) + " " + unit;
                 // zero
                 if (absValue < 1e-15)
                     return "0" + unit;
                 // femto
                 if (absValue < 1e-12)
-                    return (value * 1e15).toFixed(1) + "f" + unit;
+                    return (value * 1e15).toFixed(1) + " f" + unit;
                 // pico
                 if (absValue < 1e-9)
-                    return (value * 1e12).toFixed(1) + "p" + unit;
+                    return (value * 1e12).toFixed(1) + " p" + unit;
                 // nano
                 if (absValue < 1e-6)
-                    return (value * 1e9).toFixed(1) + "n" + unit;
+                    return (value * 1e9).toFixed(1) + " n" + unit;
                 // micro
                 if (absValue < 1e-3)
-                    return (value * 1e6).toFixed(1) + "µ" + unit;
+                    return (value * 1e6).toFixed(1) + " µ" + unit;
                 // milli
-                return (value * 1e3).toFixed(1) + "m" + unit;
+                return (value * 1e3).toFixed(1) + " m" + unit;
             }
 
             function linearValueFormatter(unit, text) {
@@ -213,9 +211,29 @@ Item {
             }
 
             // last mouse X recorded during a pan drag — updated each frame so each delta is incremental
-            property real panLastX: 0
-            // last mouse Y recorded during a pan drag — updated each frame so each delta is incremental
-            property real panLastY: 0
+            property bool selectionActive: false
+            // rectangle selection start point in overlay coordinates
+            property real selectionStartX: 0
+            property real selectionStartY: 0
+            // rectangle selection current point in overlay coordinates
+            property real selectionCurrentX: 0
+            property real selectionCurrentY: 0
+
+            // clamp a pixel X to the visible plot area
+            function clampPixelX(px) {
+                // rectangle
+                var r = graphsView.plotArea;
+                // clamp and return
+                return Math.max(r.x, Math.min(r.x + r.width, px));
+            }
+
+            // clamp a pixel Y to the visible plot area
+            function clampPixelY(py) {
+                // rectangle
+                var r = graphsView.plotArea;
+                // clamp and return
+                return Math.max(r.y, Math.min(r.y + r.height, py));
+            }
 
             // map a pixel X within the overlay to a 0-1 plot-area fraction (0=left, 1=right)
             function pixelToXRatio(px) {
@@ -227,62 +245,77 @@ Item {
                 return Math.max(0, Math.min(1, ratio));
             }
 
-            // perform a horizontal zoom around a normalized centre point
-            // `center` must be in [0,1] and represents the x-position of the
-            // mouse cursor (or any other pivot) expressed as a fraction of the
-            // current visible range. `factor` is the scale factor applied to
-            // the window width (<1 zooms in, >1 zooms out).  This routine
-            // computes the new [left,right] ratios such that the value at
-            // `center` remains fixed on the screen, mimicking the behaviour of
-            // most professional plotting applications.
-            function applyXZoom(center, factor) {
-                // compute raw ratios
-                var xr1 = center - center * factor;
-                var xr2 = center + (1.0 - center) * factor;
-                // enforce non-negative left bound only; right may exceed 1 so Python
-                // can distinguish zoom-out from pan
-                if (xr1 < 0) {
-                    xr1 = 0;
-                }
-                panel.horizontalZoom(xr1, xr2, factor);
+            // map a pixel Y within the overlay to a 0-1 chart fraction (0=bottom, 1=top)
+            function pixelToYRatio(py) {
+                // rectangle
+                var r = graphsView.plotArea;
+                // compute ratio of pixel Y within the plot area in screen coordinates
+                var screenRatio = (py - r.y) / r.height;
+                // invert to chart coordinates and clamp to [0, 1]
+                return Math.max(0, Math.min(1, 1.0 - screenRatio));
             }
 
-            // left-button drag — pans the X axis left/right
+            Rectangle {
+                visible: selectionOverlay.selectionActive
+                x: Math.min(selectionOverlay.selectionStartX, selectionOverlay.selectionCurrentX)
+                y: Math.min(selectionOverlay.selectionStartY, selectionOverlay.selectionCurrentY)
+                width: Math.abs(selectionOverlay.selectionCurrentX - selectionOverlay.selectionStartX)
+                height: Math.abs(selectionOverlay.selectionCurrentY - selectionOverlay.selectionStartY)
+                color: "#2680eb33"
+                border.color: "#56a3ff"
+                border.width: 1
+                z: 1
+            }
+
+            // left-button drag — selects a rectangle and emits normalized chart percentages on release
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton
                 // enable hover so onPositionChanged fires without a button held down
                 hoverEnabled: true
-                // show grab cursor while hovering so the interaction is discoverable
-                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                // show a crosshair so rectangle selection is discoverable
+                cursorShape: Qt.CrossCursor
 
                 onPressed: mouse => {
-                    // record the starting X and Y so the first positionChanged has a valid reference
-                    selectionOverlay.panLastX = mouse.x;
-                    selectionOverlay.panLastY = mouse.y;
+                    // clamp the drag start to the visible plot area
+                    selectionOverlay.selectionStartX = selectionOverlay.clampPixelX(mouse.x);
+                    selectionOverlay.selectionStartY = selectionOverlay.clampPixelY(mouse.y);
+                    // initialize current corner from the same point
+                    selectionOverlay.selectionCurrentX = selectionOverlay.selectionStartX;
+                    selectionOverlay.selectionCurrentY = selectionOverlay.selectionStartY;
+                    // mark selection active so the overlay rectangle becomes visible
+                    selectionOverlay.selectionActive = true;
                 }
 
                 onPositionChanged: mouse => {
-                    if (pressed) {
-                        // compute how far the mouse moved as a fraction of the plot area dimensions
-                        var dx = (mouse.x - selectionOverlay.panLastX) / graphsView.plotArea.width;
-                        var dy = (mouse.y - selectionOverlay.panLastY) / graphsView.plotArea.height;
-                        // update references for the next incremental step
-                        selectionOverlay.panLastX = mouse.x;
-                        selectionOverlay.panLastY = mouse.y;
-                        // dragging right means pulling the data right — shift the horizontal window left
-                        panel.horizontalZoom(0 - dx, 1 - dx, 1);
-                        // dragging down in screen space means pulling the data down — shift the vertical window up
-                        // screen Y is inverted vs data Y so the sign is opposite to horizontal
-                        panel.verticalZoom(dy, 1 + dy);
+                    // only update the selection rectangle during an active drag to avoid jitter while hovering
+                    if (selectionOverlay.selectionActive) {
+                        // clamp the drag end to the visible plot area
+                        selectionOverlay.selectionCurrentX = selectionOverlay.clampPixelX(mouse.x);
+                        selectionOverlay.selectionCurrentY = selectionOverlay.clampPixelY(mouse.y);
+                        // exit
+                        return;
                     }
                     // always report pointer position to the status bar
                     panel.pointerMoved(selectionOverlay.pixelToXRatio(mouse.x));
                 }
 
+                onReleased: mouse => {
+                    // clamp the drag end before computing normalized coordinates
+                    var endX = selectionOverlay.clampPixelX(mouse.x);
+                    var endY = selectionOverlay.clampPixelY(mouse.y);
+                    // only emit when we have a valid rectangle to avoid spurious events from clicks or tiny drags
+                    if (Math.abs(endX - selectionOverlay.selectionStartX) >= 10 && Math.abs(endY - selectionOverlay.selectionStartY) >= 10) {
+                        // emit rectangle corners as normalized chart-space percentages
+                        panel.zoomRegionSelected(selectionOverlay.pixelToXRatio(selectionOverlay.selectionStartX), selectionOverlay.pixelToYRatio(selectionOverlay.selectionStartY), selectionOverlay.pixelToXRatio(endX), selectionOverlay.pixelToYRatio(endY));
+                    }
+                    // hide the selection rectangle after completion
+                    selectionOverlay.selectionActive = false;
+                }
+
                 onExited: panel.pointerExited()
 
-                onDoubleClicked: panel.menuAutorange()
+                onCanceled: selectionOverlay.selectionActive = false
             }
 
             // right-button click — asks root to open the shared context menu at this location
@@ -290,38 +323,6 @@ Item {
                 anchors.fill: parent
                 acceptedButtons: Qt.RightButton
                 onClicked: mouse => panel.menuOpenRequested(mouse.x, mouse.y, panel.seriesCount)
-            }
-
-            // mouse-wheel — X zoom toward cursor (plain), Y zoom toward cursor (Alt held)
-            WheelHandler {
-                // include TouchPad so macOS trackpads are handled as well
-                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                onWheel: function (event) {
-                    // zoom factor: <1 = zoom in, >1 = zoom out; 0.15 per standard detent
-                    // log raw wheel movement
-
-                    // compute factor: positive delta will now produce f>1 (zoom out)
-                    var f = 1.0 + (event.angleDelta.y / 120) * 0.15;
-                    // clamp to avoid inverting the range or zooming out infinitely
-                    f = Math.max(0.05, Math.min(4.0, f));
-                    if (event.modifiers & Qt.AltModifier) {
-                        // vertical zoom centered on cursor Y position
-                        var r = graphsView.plotArea;
-                        // cursor as 0-1 fraction of plot height in screen space (0=top, 1=bottom)
-                        var cy_screen = Math.max(0, Math.min(1, (event.y - r.y) / r.height));
-                        // invert to data space so 0=bottom of range, 1=top of range
-                        var cy = 1.0 - cy_screen;
-                        var yr1 = cy - cy * f;
-                        var yr2 = cy + (1.0 - cy) * f;
-                        // emit dedicated vertical signal so it never collides with horizontal ratios
-                        panel.verticalZoom(yr1, yr2);
-                    } else {
-                        // horizontal zoom centered on cursor X position
-                        var cx = selectionOverlay.pixelToXRatio(event.x);
-                        // call helper on the overlay object so it’s in scope
-                        selectionOverlay.applyXZoom(cx, f);
-                    }
-                }
             }
         }
 
@@ -524,8 +525,7 @@ Item {
                 // distribute height equally, accounting for inter-panel spacing
                 height: (chartsColumn.height - chartsColumn.spacing * Math.max(0, chartsModel.count - 1)) / Math.max(1, chartsModel.count)
 
-                onHorizontalZoom: (xr1, xr2, f) => root.horizontalZoom(index, xr1, xr2, f)
-                onVerticalZoom: (yr1, yr2) => root.verticalZoom(index, yr1, yr2)
+                onZoomRegionSelected: (x0, y0, x1, y1) => root.zoomRegionSelected(index, x0, y0, x1, y1)
                 // bubble menu action signals up to root, adding chartIndex
                 onMenuZoomToFit: root.menuZoomToFit(index)
                 onMenuAutorange: root.menuAutorange(index)
