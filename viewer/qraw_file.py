@@ -105,7 +105,7 @@ class StepInformation:
     @property
     def abscissa_right_value(self) -> float:
         return self._abscissa_right_value
-    
+
     @property
     def abscissa_ascending(self) -> bool:
         return self._abscissa_ascending

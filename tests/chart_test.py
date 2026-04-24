@@ -10,7 +10,7 @@ sys.modules.setdefault("PySide6.QtCore", MagicMock())
 sys.modules.setdefault("PySide6.QtGraphs", MagicMock())
 sys.modules.setdefault("PySide6.QtQuick", MagicMock())
 
-from viewer.chart import Chart  # noqa: E402
+from viewer.chart import Chart, _binary_search, _find_abscissa_index_for_value  # noqa: E402
 from viewer.expression import Expression  # noqa: E402
 from viewer.qraw_file import StepInformation  # noqa: E402
 
@@ -28,7 +28,101 @@ def _make_step_information(num_steps: int, abscissa_length: int, ascending: bool
     return StepInformation(keys, values, abscissa_indices, abscissa_value_ranges)
 
 
+def _make_component_with_y_axis() -> MagicMock:
+    component = MagicMock()
+
+    def createYAxis(alignment, unit):
+        axis = MagicMock()
+        axis.property = MagicMock(return_value=unit)
+        return axis
+
+    component.createYAxis = MagicMock(side_effect=createYAxis)
+    component.removeAllSeries = MagicMock()
+    component.updateGraphsView = MagicMock()
+    component.resizeAbscissa = MagicMock()
+    return component
+
+
 class TestChart(TestCase):
+
+    def test_binary_search_descending_and_out_of_bounds(self):
+        # arrange
+        data = np.array([10, 8, 6, 4, 2, 0])
+        # act & assert — value in range
+        self.assertEqual(_binary_search(data, 6, ascending=False, side=1), 2)
+        # act & assert — value below range
+        self.assertEqual(_binary_search(data, -5, ascending=False, side=1), 6)
+        # act & assert — value above range
+        self.assertEqual(_binary_search(data, 15, ascending=False, side=1), 0)
+        # act & assert — _find_abscissa_index_for_value clamps to valid range
+        self.assertEqual(_find_abscissa_index_for_value(data, -5, ascending=False), 5)
+        self.assertEqual(_find_abscissa_index_for_value(data, 15, ascending=False), 0)
+
+    def test_plot_series_axis_creation_failure_logs_warning(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.linspace(0.0, 1.0, 10), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, _make_step_information(1, 10), 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        # patch _get_y_axis to return None to simulate axis creation failure
+        chart._get_y_axis = MagicMock(return_value=None)
+        with self.assertLogs("viewer.chart", level="WARNING") as cm:
+            chart.plot_series({vout})
+        # assert — warning about axis creation failure
+        self.assertTrue(any("maximum number of Y axes reached" in msg for msg in cm.output[0:2]))
+
+    def test_plot_series_skips_all_nonfinite(self):
+        # arrange
+        component = _make_component_with_y_axis()
+        abscissa = Expression("Time", np.linspace(0.0, 1.0, 10), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, _make_step_information(1, 10), 500)
+        vout = Expression("Vout", np.full(10, np.inf), "V")
+        # patch decimate_xy to return all non-finite values
+        with patch("viewer.chart.decimate_xy", return_value=(np.arange(10), np.full(10, np.inf))):
+            chart.plot_series({vout})
+        # assert — no rendered step data is stored for the expression
+        self.assertEqual(len(chart._series["Vout"][1]), 1)
+        ordinate_series = next(iter(chart._series["Vout"][1].values()))
+        self.assertEqual(ordinate_series[1], {})
+
+    def test_color_cycling_wraps_palette(self):
+        # arrange
+        component = _make_component_with_y_axis()
+        abscissa = Expression("Time", np.linspace(0.0, 1.0, 10), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, _make_step_information(1, 10), 500)
+        # patch decimate_xy to always return valid data
+        with patch("viewer.chart.decimate_xy", return_value=(np.arange(10), np.arange(10))):
+            for i in range(20):
+                expr = Expression(f"V{i}", np.arange(10), "V")
+                chart.plot_series({expr})
+        # assert — color index wraps, palette length is 14
+        self.assertLessEqual(chart._next_color_index, 20)
+
+    def test_find_abscissa_indexes_outside_window_and_descending(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.array([10, 8, 6, 4, 2, 0]), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, _make_step_information(1, 6, ascending=False), 500)
+        # act — window outside data range (should return empty slice)
+        result = chart._find_abscissa_indexes(abscissa.data, 20, 30)
+        # assert
+        self.assertEqual(result, slice(0, 0))
+
+    def test_redraw_all_series_skips_empty_decimation(self):
+        # arrange
+        component = MagicMock()
+        abscissa = Expression("Time", np.linspace(0.0, 1.0, 10), "s")
+        chart = Chart(component, "AC", MagicMock(), abscissa, _make_step_information(1, 10), 500)
+        vout = Expression("Vout", np.linspace(0.0, 5.0, 10), "V")
+        y_axis = MagicMock()
+        # inject a series with a real QLineSeries
+        chart._series = {"Vout": (vout, {vout: (y_axis, {0: MagicMock()}, 0.0, 5.0, "#f77f00")})}
+        chart._zoom_window = (0.0, None, 1.0, None)
+        # patch decimate_xy to return empty arrays
+        with patch("viewer.chart.decimate_xy", return_value=(np.array([]), np.array([]))):
+            chart._redraw_all_series()
+        # assert — no exception, series remains
+        self.assertIn("Vout", chart._series)
 
     def test_init_zoom_window(self):
         # arrange

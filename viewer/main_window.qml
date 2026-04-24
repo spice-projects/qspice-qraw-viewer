@@ -140,33 +140,33 @@ Item {
                 const absValue = Math.abs(value);
                 // giga
                 if (absValue >= 1e9)
-                    return (value / 1e9).toFixed(1) + "G" + unit;
+                    return (value / 1e9).toFixed(1) + " G" + unit;
                 // mega
                 if (absValue >= 1e6)
-                    return (value / 1e6).toFixed(1) + "M" + unit;
+                    return (value / 1e6).toFixed(1) + " M" + unit;
                 // kilo
                 if (absValue >= 1e3)
-                    return (value / 1e3).toFixed(1) + "k" + unit;
+                    return (value / 1e3).toFixed(1) + " k" + unit;
                 // base unit
                 if (absValue >= 1.0)
-                    return value.toFixed(1) + unit;
+                    return value.toFixed(1) + " " + unit;
                 // zero
                 if (absValue < 1e-15)
                     return "0" + unit;
                 // femto
                 if (absValue < 1e-12)
-                    return (value * 1e15).toFixed(1) + "f" + unit;
+                    return (value * 1e15).toFixed(1) + " f" + unit;
                 // pico
                 if (absValue < 1e-9)
-                    return (value * 1e12).toFixed(1) + "p" + unit;
+                    return (value * 1e12).toFixed(1) + " p" + unit;
                 // nano
                 if (absValue < 1e-6)
-                    return (value * 1e9).toFixed(1) + "n" + unit;
+                    return (value * 1e9).toFixed(1) + " n" + unit;
                 // micro
                 if (absValue < 1e-3)
-                    return (value * 1e6).toFixed(1) + "µ" + unit;
+                    return (value * 1e6).toFixed(1) + " µ" + unit;
                 // milli
-                return (value * 1e3).toFixed(1) + "m" + unit;
+                return (value * 1e3).toFixed(1) + " m" + unit;
             }
 
             function linearValueFormatter(unit, text) {

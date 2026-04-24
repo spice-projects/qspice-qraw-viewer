@@ -44,7 +44,7 @@ def _binary_search(data: np.ndarray, value: float, ascending: bool, side: int) -
         while lo < hi:
             # middle index
             middle = (lo + hi) // 2
-            # compare middle value with target value            
+            # compare middle value with target value
             if (side == 1 and data[middle] < value) or (side == -1 and data[middle] <= value):
                 # move lo up
                 lo = middle + 1
@@ -57,7 +57,7 @@ def _binary_search(data: np.ndarray, value: float, ascending: bool, side: int) -
     while lo < hi:
         # middle index
         middle = (lo + hi) // 2
-        # compare middle value with target value            
+        # compare middle value with target value
         if (side == 1 and data[middle] > value) or (side == -1 and data[middle] >= value):
             # move lo up
             lo = middle + 1
@@ -124,6 +124,10 @@ class Chart:
     @property
     def selected_steps(self) -> set[int]:
         return self._selected_steps
+
+    @property
+    def zoom_window(self) -> tuple[float | None, float | None, float | None, float | None]:
+        return self._zoom_window
 
     @selected_steps.setter
     def selected_steps(self, selected_steps: set[int]) -> None:
@@ -381,7 +385,7 @@ class Chart:
         if not self._series:
             return []
         # ascending or descending abscissa
-        ascending = self._step_information.abscissa_ascending        
+        ascending = self._step_information.abscissa_ascending
         # collect one (name, unit, value) tuple per plotted variant (magnitude/phase counted separately)
         result: list[tuple[str, str, list[float]]] = []
         # loop series
@@ -405,13 +409,13 @@ class Chart:
                 result.append((ordinate_variant.name, ordinate_variant.unit, values))
         # exit
         return result
-    
+
     def _ratio_to_abscissa_value(self, x_ratio: float) -> float:
         # make sure ratio is between 0 and 1
         percentage = max(0.0, min(1.0, x_ratio))
         # convert to abscissa value
         return self._step_information.abscissa_left_value + percentage * (self._step_information.abscissa_right_value - self._step_information.abscissa_left_value)
-    
+
     def abscissa_value_at_cursor(self, cursor: float) -> float:
         # make sure cursor is between 0 and 1
         percentage = max(0.0, min(1.0, cursor))

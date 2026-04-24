@@ -39,30 +39,43 @@ class TestStepToolDialog(TestCase):
         class _Signal:
             def connect(self, _slot):
                 return None
+
         class _FakeQuickView:
             class Status:
                 Ready = object()
+
             class ResizeMode:
                 SizeRootObjectToView = object()
+
             def __init__(self):
                 self.statusChanged = _Signal()
+
             def setResizeMode(self, _mode):
                 return None
+
             def setColor(self, _color):
                 return None
+
             def setSource(self, _source):
                 return None
+
             def rootObject(self):
                 return MagicMock()
+
         class _FakeWidget:
+
             @staticmethod
             def createWindowContainer(_view, _parent):
                 return object()
+
         class _FakeLayout:
+
             def __init__(self, _parent):
                 return None
+
             def setContentsMargins(self, _a, _b, _c, _d):
                 return None
+
             def addWidget(self, _widget):
                 return None
         original_qquickview = StepToolDialog.__init__.__globals__["QQuickView"]

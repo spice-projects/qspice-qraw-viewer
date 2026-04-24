@@ -311,9 +311,6 @@ class MainWindow(QMainWindow):
     def _on_menu_zoom_to_fit(self, chart_index: int):
         # log information
         logger.debug("User requested zoom to fit on chart at index: %d", chart_index)
-        # reset fields
-        self.x_left_ratio = 0.0
-        self.x_right_ratio = 1.0
         # update charts
         for index, chart in enumerate(self._charts):
             # check if this is the chart that triggered the zoom to fit action
@@ -338,9 +335,6 @@ class MainWindow(QMainWindow):
     def _on_menu_zoom_abscissa_extent(self, chart_index: int):
         # log information
         logger.debug("User requested zoom abscissa extent on chart at index: %d", chart_index)
-        # reset fields
-        self.x_left_ratio = 0.0
-        self.x_right_ratio = 1.0
         # update charts
         for chart in self._charts:
             # update zoom window
@@ -445,128 +439,143 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def _on_menu_fft(self, chart_index: int):
-        # # log information
-        # logger.debug("User requested FFT on chart at index: %d", chart_index)
-        # # find chart
-        # chart = self._charts[chart_index]
-        # # collect real-valued ordinate expressions currently plotted on this chart
-        # expressions = [v for v in chart.expressions if not v.complex and v != chart.abscissa]
-        # if not expressions:
-        #     # log warning — no suitable expressions to transform
-        #     logger.warning("No suitable time-domain expressions to FFT on chart %d", chart_index)
-        #     # exit
-        #     return
-        # # open FFT settings dialog
-        # reference_step = min(chart.selected_steps) if chart.selected_steps else 0
-        # reference_slice = self._step_information.abscissa_indices[reference_step]
-        # fft_abscissa = Expression(self._abscissa.name, self._abscissa.data[reference_slice], self._abscissa.unit, self._abscissa.source, self._abscissa.variable_type)
-        # dialog = FftDialog(expressions, fft_abscissa, self._abscissa_from_index, self._abscissa_to_index, self)
-        # if dialog.exec() != FftDialog.DialogCode.Accepted:
-        #     return
-        # # retrieve user selections
-        # result_expressions = dialog.result_expressions
-        # from_index = dialog.result_from_index
-        # to_index = dialog.result_to_index
-        # window = dialog.result_window
-        # zero_pad = dialog.result_zero_pad
-        # normalize = dialog.result_normalize
-        # keep_dc = dialog.result_keep_dc
-        # output = dialog.result_output
-        # # number of samples per step (abscissa is already trimmed to one step)
-        # step_count = self._step_information.length
-        # # build FFT step slices and values for each input step independently to support variable step lengths
-        # fft_step_indices: list[slice] = []
-        # fft_source_steps: list[int] = []
-        # frequency_chunks: list[np.ndarray] = []
-        # fft_chunks: list[list[np.ndarray]] = [[] for _ in result_expressions]
-        # # running index over the flattened FFT vectors
-        # fft_offset = 0
-        # # rows are [expr0, expr1, ..., exprN] for one step per FFT call
-        # signal_count = len(result_expressions)
-        # # process each source step independently to avoid assuming equal step lengths
-        # for step_index in range(step_count):
-        #     # source step slice in flattened arrays
-        #     step_slice = self._step_information.abscissa_indices[step_index]
-        #     # number of source samples in this step
-        #     step_points = step_slice.stop - step_slice.start
-        #     # clamp global zoom bounds to this step and keep at least two samples
-        #     if step_points < 2:
-        #         continue
-        #     step_from_index = max(0, min(from_index, step_points - 2))
-        #     step_to_index = max(step_from_index + 2, min(to_index, step_points))
-        #     # absolute array bounds for this step's FFT window
-        #     source_from_index = step_slice.start + step_from_index
-        #     source_to_index = step_slice.start + step_to_index
-        #     # shared x slice for this step
-        #     x = self._abscissa.data[source_from_index:source_to_index]
-        #     # build a dense matrix for all selected expressions for this step
-        #     y_matrix = np.empty((signal_count, source_to_index - source_from_index))
-        #     # fill matrix row-by-row using contiguous slices
-        #     for expr_index, expression in enumerate(result_expressions):
-        #         y_matrix[expr_index] = expression.data[source_from_index:source_to_index]
-        #     try:
-        #         # fft internals allocate output arrays (spectrum/frequency/value matrices)
-        #         frequencies, fft_matrix = compute_fft_many(x, y_matrix, window, zero_pad, normalize, output, keep_dc)
-        #     except ValueError:
-        #         # log exception and abort
-        #         logger.exception("Batch FFT computation failed for chart %d step %d", chart_index, step_index)
-        #         # exit
-        #         return
-        #     # guard against an unexpectedly empty frequency axis
-        #     if len(frequencies) == 0:
-        #         # log error and abort when no frequencies are returned
-        #         logger.error("FFT computation returned an empty frequency axis for chart %d step %d", chart_index, step_index)
-        #         # exit
-        #         return
-        #     # append frequency bins for this step
-        #     frequency_chunks.append(frequencies)
-        #     # append source step index for later selection mapping
-        #     fft_source_steps.append(step_index)
-        #     # append per-expression FFT values for this step
-        #     for expr_index in range(signal_count):
-        #         fft_chunks[expr_index].append(fft_matrix[expr_index])
-        #     # store step output slice for the FFT result vectors
-        #     fft_step_indices.append(slice(fft_offset, fft_offset + len(frequencies)))
-        #     # advance output offset
-        #     fft_offset += len(frequencies)
-        # # require at least one processed step
-        # if not frequency_chunks:
-        #     # log warning and abort when no step had enough samples for FFT
-        #     logger.warning("FFT computation skipped: no step has at least 2 samples in the selected range")
-        #     # exit
-        #     return
-        # fft_expressions: list[Expression] = []
-        # for expr_index, expression in enumerate(result_expressions):
-        #     # flatten all per-step chunks for this expression into one step-major vector
-        #     expression_data = np.concatenate(fft_chunks[expr_index])
-        #     expression_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else expression.unit)
-        #     fft_expressions.append(Expression(f"FFT({expression.name.replace(' ', '')})", expression_data, expression_unit))
-        # # flatten per-step frequency bins into one step-major vector
-        # frequency_data = np.concatenate(frequency_chunks)
-        # # create frequency expression with per-step variable lengths
-        # freq_expression = Expression("Frequency", frequency_data, "Hz")
-        # # build expression manager with frequency abscissa and all FFT results
-        # expression_manager = ExpressionManager([freq_expression] + fft_expressions)
-        # # build one «name» group per FFT expression so each gets its own chart
-        # plot_suggestion = " ".join(f"\xabfft {e.name}\xbb" for e in fft_expressions)
-        # # map source parameter values onto FFT steps
-        # fft_step_values = [self._step_information.values[index] for index in fft_source_steps]
-        # # create step information for FFT output
-        # fft_step_information = StepInformation(self._step_information.keys, fft_step_values, fft_step_indices)
-        # # create a synthetic QRawFile with frequency abscissa and all FFT values;
-        # # steps matches the source simulation so the FFT window inherits full step coverage
-        # fft_qraw = QRawFile(filename=self._qraw_path, title=f"FFT – {', '.join(e.name for e in result_expressions)}", date="", plotname="FFT", complex=False, step_information=fft_step_information, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=plot_suggestion, expression_manager=expression_manager, chart_type="FFT")
-        # # create a new MainWindow to render the FFT result using the existing infrastructure;
-        # # pass the original source path so Jupyter always opens the correct .qraw file
-        # fft_window = MainWindow(fft_qraw, source_qraw_path=self._qraw_path)
-        # # pre-focus the FFT window on the same steps the user was viewing in the source chart
-        # source_to_fft_index = {source_step: fft_step for fft_step, source_step in enumerate(fft_source_steps)}
-        # fft_window._initial_selected_steps = {source_to_fft_index[source_step] for source_step in chart.selected_steps if source_step in source_to_fft_index}
-        # # keep reference alive independently of the source main window
-        # _register_child_window(fft_window)
-        # # show the FFT result window
-        # fft_window.show()
-        ...
+        # log information
+        logger.debug("User requested FFT on chart at index: %d", chart_index)
+        # find chart
+        chart = self._charts[chart_index]
+        # collect real-valued ordinate expressions currently plotted on this chart
+        expressions = [v for v in chart.expressions if not v.complex and v != chart.abscissa]
+        if not expressions:
+            # log warning — no suitable expressions to transform
+            logger.warning("No suitable time-domain expressions to FFT on chart %d", chart_index)
+            # exit
+            return
+        # min and max abscissa values (time domain abscissa is always ascending order)
+        min_abscissa_value = self._step_information.abscissa_left_value
+        max_abscissa_value = self._step_information.abscissa_right_value
+        # current chart zoom ratios for the abscissa axis (0.0 to 1.0)
+        x_left_ratio, _, x_right_ratio, _ = chart.zoom_window
+        # apply selected chart zoom
+        min_abscissa_value_zoomed = min_abscissa_value + (x_left_ratio or 0.0) * (max_abscissa_value - min_abscissa_value)
+        max_abscissa_value_zoomed = min_abscissa_value + (x_right_ratio or 1.0) * (max_abscissa_value - min_abscissa_value)
+        # open FFT settings dialog
+        dialog = FftDialog(self, expressions, min_abscissa_value, max_abscissa_value, min_abscissa_value_zoomed, max_abscissa_value_zoomed)
+        # check if the user accepted the dialog; if not, exit without doing anything
+        if dialog.exec() != FftDialog.DialogCode.Accepted:
+            return
+        # retrieve user selections
+        result_expressions = dialog.result_expressions
+        from_abscissa_value = dialog.result_from_index
+        to_abscissa_value = dialog.result_to_index
+        window = dialog.result_window
+        zero_pad = dialog.result_zero_pad
+        normalize = dialog.result_normalize
+        keep_dc = dialog.result_keep_dc
+        output = dialog.result_output
+        # list of frequency bins for each step, to be concatenated across steps later
+        frequency_chunks: list[np.ndarray] = []
+        # fft data chunks for each expression, to be concatenated across steps later; outer list is per-expression, inner list is per-step
+        fft_chunks: list[list[np.ndarray]] = [[] for _ in result_expressions]
+        # fft step & step indices for step information structure
+        fft_steps: list[int] = []
+        fft_abscissa_indices: list[slice] = []
+        # step abscissa value ranges
+        fft_abscissa_value_ranges: list[tuple[float, float]] = []
+        # fft step index offset
+        fft_offset = 0
+        # loop steps
+        for step in range(self._step_information.length):
+            # step data slice
+            step_slice = self._step_information.abscissa_indices[step]
+            # abscissa values for this step
+            step_abscissa = self._abscissa.data[step_slice]
+            # find indices in this step corresponding to the selected abscissa range
+            from_index = np.searchsorted(step_abscissa, from_abscissa_value, side="left")
+            to_index = np.searchsorted(step_abscissa, to_abscissa_value, side="right")
+            # we require at least 2 samples in the selected range to perform an FFT, otherwise skip this step
+            if to_index - from_index < 2:
+                # log warning and skip this step when it has fewer than 2 samples in the selected range
+                logger.warning("Skipping FFT for chart %d step %d: selected range has fewer than 2 samples", chart_index, step)
+                # next step
+                continue
+            # abscissa data for the interval
+            step_abscissa_data = step_abscissa[from_index:to_index]
+            # rows are [expr0, expr1, ..., exprN] for one step per FFT call
+            signal_count = len(result_expressions)
+            # build a dense matrix for all selected expressions for this step
+            y_matrix = np.empty((signal_count, to_index - from_index))
+            # fill matrix row-by-row using contiguous slices
+            for expr_index, expression in enumerate(result_expressions):
+                # expression data for this step
+                expression_step_data = expression.data[step_slice]
+                # slice out the selected abscissa range for this expression and store it in the matrix
+                y_matrix[expr_index] = expression_step_data[from_index:to_index]
+            try:
+                # fft internals allocate output arrays (spectrum/frequency/value matrices)
+                frequencies, fft_matrix = compute_fft_many(step_abscissa_data, y_matrix, window, zero_pad, normalize, output, keep_dc)
+                # guard against an unexpectedly empty frequency axis
+                if len(frequencies) == 0:
+                    # log error and abort when no frequencies are returned
+                    logger.error("FFT computation returned an empty frequency axis for chart %d step %d", chart_index, step)
+                    # exit
+                    return
+                # append frequency bins for this step
+                frequency_chunks.append(frequencies)
+                #  append per-expression FFT values for this step
+                for expr_index in range(signal_count):
+                    fft_chunks[expr_index].append(fft_matrix[expr_index])
+                # store step output slice for the FFT result vectors
+                fft_abscissa_indices.append(slice(fft_offset, fft_offset + len(frequencies)))
+                # advance output offset
+                fft_offset += len(frequencies)
+                # append step as processed
+                fft_steps.append(step)
+                # append abscissa value range for this step
+                fft_abscissa_value_ranges.append((frequencies[0], frequencies[-1]))
+            except ValueError:
+                # log exception and abort
+                logger.exception("Batch FFT computation failed for chart %d step %d", chart_index, step)
+                # exit
+                return
+        # require at least one processed step
+        if not frequency_chunks:
+            # log warning and abort when no step had enough samples for FFT
+            logger.warning("FFT computation skipped: no step has at least 2 samples in the selected range")
+            # exit
+            return
+        # build fft expressions
+        fft_expressions: list[Expression] = []
+        # loop processed expressions
+        for expr_index, expression in enumerate(result_expressions):
+            # flatten all per-step chunks for this expression into one step-major vector
+            expression_data = np.concatenate(fft_chunks[expr_index])
+            # unit
+            expression_unit = "°" if output == FftOutput.PHASE else ("dB" if output == FftOutput.MAGNITUDE_DB else expression.unit)
+            # create expression for this FFT result
+            fft_expressions.append(Expression(f"FFT({expression.name.replace(' ', '')})", expression_data, expression_unit))
+        # flatten per-step frequency bins into one step-major vector
+        frequency_data = np.concatenate(frequency_chunks)
+        # create frequency expression with per-step variable lengths
+        freq_expression = Expression("Frequency", frequency_data, "Hz")
+        # build expression manager with frequency abscissa and all FFT results
+        expression_manager = ExpressionManager([freq_expression] + fft_expressions)
+        # build one «name» group per FFT expression so each gets its own chart
+        plot_suggestion = " ".join(f"\xabfft {e.name}\xbb" for e in fft_expressions)
+        # map source parameter values onto FFT steps (only available when there are multiple steps, otherwise leave empty)
+        fft_values = [self._step_information.values[index] for index in fft_steps] if self._step_information.length > 1 else []
+        # create step information for FFT output
+        fft_step_information = StepInformation(self._step_information.keys, fft_values, fft_abscissa_indices, fft_abscissa_value_ranges)
+        # create qraw file with fft calculation results
+        fft_qraw = QRawFile(filename=self._qraw_path, title=f"FFT – {', '.join(e.name for e in result_expressions)}", date="", plotname="FFT", complex=False, step_information=fft_step_information, abscissa=freq_expression, abscissa_scale=AbscissaScale.LINEAR, command="", plot_suggestion=plot_suggestion, expression_manager=expression_manager, chart_type="FFT")
+        # create a new MainWindow to render the FFT result
+        fft_window = MainWindow(fft_qraw, source_qraw_path=self._qraw_path)
+        # pre-focus the FFT window on the same steps the user was viewing in the source chart
+        source_to_fft_index = {source_step: fft_step for fft_step, source_step in enumerate(fft_steps)}
+        fft_window._initial_selected_steps = {source_to_fft_index[source_step] for source_step in chart.selected_steps if source_step in source_to_fft_index}
+        # keep reference alive independently of the source main window
+        _register_child_window(fft_window)
+        # show the FFT result window
+        fft_window.show()
 
     @Slot(int, float)
     def _on_pointer_moved(self, chart_index: int, x_ratio: float):
