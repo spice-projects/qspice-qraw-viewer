@@ -104,8 +104,7 @@ def resample_uniform(x: np.ndarray, y: np.ndarray, num_points: int | None = None
 
     Returns
     -------
-    Tuple *(x_uniform, y_uniform)* on an evenly-spaced grid spanning
-    ``[x[0], x[-1]]``.
+    Tuple *(x_uniform, y_uniform)* on an evenly-spaced grid spanning ``[x[0], x[-1]]``.
     """
     # default to same number of points as the input
     if num_points is None:

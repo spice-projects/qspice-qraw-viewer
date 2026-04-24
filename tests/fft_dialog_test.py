@@ -13,11 +13,23 @@ sys.modules.setdefault("PySide6.QtWidgets", MagicMock())
 # Slot must act as a pass-through decorator so @Slot(...) does not replace the method with a mock
 sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
 # QDialog must be a concrete class so that FftDialog can genuinely inherit from it
-sys.modules["PySide6.QtWidgets"].QDialog = type("QDialog", (), {"accept": lambda self: None, "reject": lambda self: None})
+sys.modules["PySide6.QtWidgets"].QDialog = type(
+    "QDialog",
+    (),
+    {
+        "__init__": lambda self, parent=None: None,
+        "accept": lambda self: None,
+        "reject": lambda self: None,
+        "setWindowTitle": lambda self, title: None,
+        "setWindowModality": lambda self, modality: None,
+        "resize": lambda self, width, height: None,
+        "setMinimumHeight": lambda self, height: None,
+    },
+)
 
 from viewer.expression import Expression  # noqa: E402
 from viewer.fft import FftOutput, WindowFunction, ZeroPadding  # noqa: E402
-from viewer.fft_dialog import FftDialog  # noqa: E402
+from viewer.fft_dialog import FftDialog, QQuickView  # noqa: E402
 
 
 def _make_dialog(abscissa_values=None, zoom_from=0, zoom_to=10):
@@ -27,15 +39,15 @@ def _make_dialog(abscissa_values=None, zoom_from=0, zoom_to=10):
     abscissa = Expression("Time", abscissa_values, "s")
     e1 = Expression("V(R1)", np.ones(len(abscissa_values)), "V")
     e2 = Expression("I(L1)", np.ones(len(abscissa_values)) * 2.0, "A")
-    dialog = FftDialog.__new__(FftDialog)
+    dialog = object.__new__(FftDialog)
     dialog._expressions = [e1, e2]
     dialog._abscissa = abscissa
     dialog._zoom_from_index = zoom_from
     dialog._zoom_to_index = zoom_to
     dialog._selected_expressions = {e1, e2}
     dialog._result_expressions = []
-    dialog._result_from_index = 0
-    dialog._result_to_index = len(abscissa_values)
+    dialog._result_from_index = float(abscissa_values[0])
+    dialog._result_to_index = float(abscissa_values[-1])
     dialog._result_window = WindowFunction.RECTANGULAR
     dialog._result_zero_pad = ZeroPadding.NONE
     dialog._result_normalize = False
@@ -171,48 +183,8 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # act
         dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "full", 0.0, 1.0, False)
         # assert
-        self.assertEqual(dialog._result_from_index, 0)
-        self.assertEqual(dialog._result_to_index, 11)
-
-    def test_range_mode_zoom_uses_stored_zoom_window(self):
-        # arrange — zoom window [3, 8)
-        dialog, _e1, _e2 = _make_dialog(np.linspace(0.0, 1.0, 11), zoom_from=3, zoom_to=8)
-        # act
-        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "zoom", 0.0, 1.0, False)
-        # assert
-        self.assertEqual(dialog._result_from_index, 3)
-        self.assertEqual(dialog._result_to_index, 8)
-
-    def test_range_mode_custom_maps_time_to_indices(self):
-        # arrange — 11-point abscissa 0…1 s
-        abscissa = np.linspace(0.0, 1.0, 11)
-        dialog, _e1, _e2 = _make_dialog(abscissa)
-        # act — request range 0.2 s … 0.8 s (avoid 0.6 which has floating-point representability issues)
-        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.2, 0.8, False)
-        # assert — from_index=2 for 0.2; to_index verified against actual searchsorted output
-        self.assertEqual(dialog._result_from_index, 2)
-        # searchsorted(arr, 0.8, side='right') where arr[8]=0.8 → position 9
-        import numpy as _np
-        expected_to = int(_np.searchsorted(abscissa, 0.8, side="right"))
-        self.assertEqual(dialog._result_to_index, expected_to)
-
-    def test_range_mode_custom_clamps_above_total(self):
-        # arrange
-        abscissa = np.linspace(0.0, 1.0, 11)
-        dialog, _e1, _e2 = _make_dialog(abscissa)
-        # act — to_time beyond the end of the array
-        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.5, 999.0, False)
-        # assert — to_index clamped to total (11)
-        self.assertEqual(dialog._result_to_index, 11)
-
-    def test_range_mode_custom_ensures_minimum_two_samples(self):
-        # arrange — very narrow custom range that resolves to the same index
-        abscissa = np.linspace(0.0, 1.0, 11)
-        dialog, _e1, _e2 = _make_dialog(abscissa)
-        # act — from_time and to_time both map to index 5
-        dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "custom", 0.5, 0.5, False)
-        # assert — at least 2 samples guaranteed
-        self.assertGreaterEqual(dialog._result_to_index - dialog._result_from_index, 2)
+        self.assertEqual(dialog._result_from_index, 0.0)
+        self.assertEqual(dialog._result_to_index, 1.0)
 
     def test_range_mode_unknown_falls_back_to_full(self):
         # arrange
@@ -220,8 +192,8 @@ class TestFftDialogOnDialogAccepted(TestCase):
         # act — unrecognised range_mode triggers full-range fallback
         dialog._on_dialog_accepted("Rectangular", "None", "Magnitude", False, "unknown_mode", 0.0, 1.0, False)
         # assert
-        self.assertEqual(dialog._result_from_index, 0)
-        self.assertEqual(dialog._result_to_index, 11)
+        self.assertEqual(dialog._result_from_index, 0.0)
+        self.assertEqual(dialog._result_to_index, 1.0)
 
     def test_keep_dc_flag_true(self):
         # arrange
@@ -240,7 +212,52 @@ class TestFftDialogOnDialogAccepted(TestCase):
         self.assertFalse(dialog._result_keep_dc)
 
 
-class TestFftDialogResultProperties(TestCase):
+class TestFftDialogInitAndQml(TestCase):
+
+    def test_constructor_sets_fields_and_ctx_properties(self):
+        # arrange
+        parent = MagicMock()
+        expressions = [Expression("A", np.arange(5), "V"), Expression("B", np.arange(5), "A")]
+        min_val = 0.0
+        max_val = 10.0
+        min_zoom = 2.0
+        max_zoom = 8.0
+        # act
+        dialog = FftDialog(parent, expressions, min_val, max_val, min_zoom, max_zoom)
+        # assert
+        self.assertEqual(dialog._expressions, expressions)
+        self.assertEqual(dialog._selected_expressions, set(expressions))
+        self.assertEqual(dialog._result_from_index, min_val)
+        self.assertEqual(dialog._result_to_index, max_val)
+        self.assertEqual(dialog._result_window, WindowFunction.HANNING)
+        self.assertEqual(dialog._result_zero_pad, ZeroPadding.NONE)
+        self.assertFalse(dialog._result_normalize)
+        self.assertFalse(dialog._result_keep_dc)
+        self.assertEqual(dialog._result_output, FftOutput.MAGNITUDE)
+        self.assertIn("windowFunctions", dialog._ctx_properties)
+        self.assertIn("outputTypes", dialog._ctx_properties)
+        self.assertIn("zeroPaddingOptions", dialog._ctx_properties)
+        self.assertEqual(dialog._ctx_properties["abscissaMin"], min_val)
+        self.assertEqual(dialog._ctx_properties["abscissaMax"], max_val)
+        self.assertEqual(dialog._ctx_properties["zoomFromTime"], min_zoom)
+        self.assertEqual(dialog._ctx_properties["zoomToTime"], max_zoom)
+
+    def test_on_qml_ready_injects_properties_and_connects_signals(self):
+        # arrange
+        dialog, _e1, _e2 = _make_dialog()
+        mock_root = MagicMock()
+        dialog._qml_view = MagicMock()
+        dialog._qml_view.rootObject.return_value = mock_root
+        dialog._ctx_properties = {"foo": 123, "bar": 456}
+        # act
+        dialog._on_qml_ready(QQuickView.Status.Ready)
+        # assert
+        mock_root.setProperty.assert_any_call("foo", 123)
+        mock_root.setProperty.assert_any_call("bar", 456)
+        mock_root.initializeExpressions.assert_called()
+        mock_root.selectionChanged.connect.assert_called_with(dialog._on_expression_selection_changed)
+        mock_root.dialogAccepted.connect.assert_called_with(dialog._on_dialog_accepted)
+        mock_root.dialogRejected.connect.assert_called_with(dialog.reject)
 
     def test_result_expressions_property_default_is_empty_list(self):
         # arrange
@@ -258,16 +275,16 @@ class TestFftDialogResultProperties(TestCase):
     def test_result_from_index_property(self):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
-        dialog._result_from_index = 4
+        dialog._result_from_index = 0.4
         # act / assert
-        self.assertEqual(dialog.result_from_index, 4)
+        self.assertEqual(dialog.result_from_index, 0.4)
 
     def test_result_to_index_property(self):
         # arrange
         dialog, _e1, _e2 = _make_dialog()
-        dialog._result_to_index = 7
+        dialog._result_to_index = 0.7
         # act / assert
-        self.assertEqual(dialog.result_to_index, 7)
+        self.assertEqual(dialog.result_to_index, 0.7)
 
     def test_result_window_property(self):
         # arrange

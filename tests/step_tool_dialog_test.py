@@ -39,30 +39,43 @@ class TestStepToolDialog(TestCase):
         class _Signal:
             def connect(self, _slot):
                 return None
+
         class _FakeQuickView:
             class Status:
                 Ready = object()
+
             class ResizeMode:
                 SizeRootObjectToView = object()
+
             def __init__(self):
                 self.statusChanged = _Signal()
+
             def setResizeMode(self, _mode):
                 return None
+
             def setColor(self, _color):
                 return None
+
             def setSource(self, _source):
                 return None
+
             def rootObject(self):
                 return MagicMock()
+
         class _FakeWidget:
+
             @staticmethod
             def createWindowContainer(_view, _parent):
                 return object()
+
         class _FakeLayout:
+
             def __init__(self, _parent):
                 return None
+
             def setContentsMargins(self, _a, _b, _c, _d):
                 return None
+
             def addWidget(self, _widget):
                 return None
         original_qquickview = StepToolDialog.__init__.__globals__["QQuickView"]
@@ -77,7 +90,7 @@ class TestStepToolDialog(TestCase):
         StepToolDialog.__init__.__globals__["QUrl"] = MagicMock(fromLocalFile=lambda value: value)
         StepToolDialog.__init__.__globals__["QColor"] = lambda value: value
         StepToolDialog.__init__.__globals__["Qt"] = MagicMock(WindowModality=MagicMock(WindowModal=object()))
-        step_information = StepInformation(keys=["temp", "vdd"], values=[(25, 1.8), (100, 3.3)], indices=[slice(0, 2), slice(2, 4)])
+        step_information = StepInformation(keys=["temp", "vdd"], values=[(25, 1.8), (100, 3.3)], abscissa_indices=[slice(0, 2), slice(2, 4)], abscissa_value_ranges=[(0.0, 1.0), (1.0, 2.0)])
         # act
         dialog = StepToolDialog(parent=MagicMock(), step_information=step_information, selected_steps={3, 1})
         # assert
