@@ -173,7 +173,7 @@ class QspiceEvaluator:
         # bind argument values to parameter names
         for param, arg in zip(definition.params, expression.args):
             local_variables[param.casefold()] = self._evaluate(arg, context, call_stack)
-        # build the local evaluation context; propagate step_slices so @N works inside function bodies
+        # build the local evaluation context; propagate step_slices, functions, and constants so @N and nested calls work inside function bodies
         local_context = EvaluationContext(local_variables, context.functions, context.constants, context.step_slices)
         # evaluate the function body
         return self._evaluate(definition.body, local_context, call_stack + (function_name,))

@@ -283,7 +283,7 @@ class QspiceParser:
             raise ValueError(f"Step selector @{selector_text!r} is not a valid integer")
         # reject zero and negative step indices (1-based QSPICE convention)
         if step_index < 1:
-            raise ValueError(f"Step selector @{step_index} is out of range: must be >= 1")
+            raise ValueError(f"Step selector @{step_index} is invalid: indices must be >= 1")
         return StepSelectorNode(expression, step_index)
 
     def _parse_argument_list(self) -> list[ExpressionNode]:

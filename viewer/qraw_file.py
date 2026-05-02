@@ -419,7 +419,7 @@ class QRawFile:
             abscissa = _process_scale(variables[0], abscissa_scale)
             # process steps using the scaled abscissa values — slices are needed by the expression manager for @N
             step_information = _process_steps(stepped, variables, abscissa, num_points)
-            # build step slices tuple for @N selector support in .func definitions
+            # build step slices tuple for @N selector support in expressions and .func definitions
             step_slices: tuple[slice, ...] | None = tuple(step_information.abscissa_indices) if step_information.length > 1 else None
             # create expression manager, passing any user-defined .func definitions and step slice metadata
             expression_manager = ExpressionManager(variables, func_definitions if func_definitions else None, step_slices)
