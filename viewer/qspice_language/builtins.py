@@ -266,6 +266,7 @@ BUILTIN_CONSTANTS: dict[str, QspiceValue] = {
     "e": np.asarray(np.e),
     "mho": np.asarray(1.0),
     "pi": np.asarray(np.pi),
+    "s": np.asarray(1.0),
     "t": np.asarray(1e12),
     "g": np.asarray(1e9),
     "meg": np.asarray(1e6),

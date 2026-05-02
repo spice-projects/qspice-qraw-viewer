@@ -286,7 +286,7 @@ class TestQspiceParserParity(TestCase):
         parser = QspiceParser()
         # act / assert
         with self.assertRaises(ValueError):
-            parser.parse_expression("V(out) @ 2")
+            parser.parse_expression("V(out) % 2")
 
     def test_parse_error_trailing_token(self):
         # arrange

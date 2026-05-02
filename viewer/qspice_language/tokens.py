@@ -16,6 +16,7 @@ class TokenKind(Enum):
     COMMA = "COMMA"
     QUESTION = "QUESTION"
     COLON = "COLON"
+    AT = "AT"
     PLUS = "PLUS"
     MINUS = "MINUS"
     STAR = "STAR"

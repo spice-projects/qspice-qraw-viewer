@@ -203,7 +203,12 @@ class QspiceParser:
     @staticmethod
     def _last_was_primary(node: ExpressionNode) -> bool:
         # return true if the node is a simple primary (number or identifier)
-        return isinstance(node, (NumberNode, IdentifierNode))
+        if isinstance(node, (NumberNode, IdentifierNode)):
+            return True
+        # a binary expression ending in a primary also qualifies — handles e.g. "a * 1" followed by "s"
+        if isinstance(node, BinaryOperationNode):
+            return QspiceParser._last_was_primary(node.right)
+        return False
 
     def _parse_unary(self) -> ExpressionNode:
         # parse unary plus
@@ -243,15 +248,15 @@ class QspiceParser:
             identifier = self._consume(TokenKind.IDENTIFIER).text
             # exit early for a bare identifier
             if self._peek().kind != TokenKind.LPAREN:
-                return IdentifierNode(identifier)
+                return self._parse_postfix_reference(IdentifierNode(identifier))
             # consume the argument list opener
             self._consume(TokenKind.LPAREN)
             # parse the argument list
             args = self._parse_argument_list()
             # consume the argument list closer
             self._consume(TokenKind.RPAREN)
-            # exit
-            return FunctionCallNode(identifier, args)
+            # parse an optional selector suffix such as V(INOISE)@1 as a direct identifier lookup
+            return self._parse_postfix_reference(FunctionCallNode(identifier, args))
         # parse a parenthesized sub-expression
         if token.kind == TokenKind.LPAREN:
             self._consume(TokenKind.LPAREN)
@@ -260,6 +265,30 @@ class QspiceParser:
             return expression
         # fail on an unexpected token
         raise ValueError(f"Unexpected token {token.text!r} at offset {token.start}")
+
+    def _parse_postfix_reference(self, expression: ExpressionNode) -> ExpressionNode:
+        # support probe selectors such as V(INOISE)@1 by collapsing them into a direct identifier
+        if self._peek().kind != TokenKind.AT:
+            return expression
+        base_text = self._reference_text(expression)
+        if base_text is None:
+            return expression
+        self._consume(TokenKind.AT)
+        suffix = self._peek()
+        if suffix.kind not in (TokenKind.NUMBER, TokenKind.IDENTIFIER):
+            raise ValueError(f"Expected selector after @ at offset {suffix.start}")
+        selector = self._consume(suffix.kind).text
+        return IdentifierNode(base_text + "@" + selector)
+
+    def _reference_text(self, expression: ExpressionNode) -> str | None:
+        # serialize simple references so they can be used as direct lookup keys
+        if isinstance(expression, IdentifierNode):
+            return expression.name
+        if isinstance(expression, NumberNode):
+            return expression.text
+        if isinstance(expression, FunctionCallNode):
+            return expression.name + "(" + ",".join(self._reference_text(arg) or "" for arg in expression.args) + ")"
+        return None
 
     def _parse_argument_list(self) -> list[ExpressionNode]:
         # collect argument expressions

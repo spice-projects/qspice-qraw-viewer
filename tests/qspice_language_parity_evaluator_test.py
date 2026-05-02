@@ -578,6 +578,18 @@ class TestQspiceEvaluatorParity(TestCase):
         # assert
         self.assertAlmostEqual(float(result), 2 * np.pi)
 
+    def test_evaluate_implicit_multiplication_after_explicit_operator_chain(self):
+        # arrange — "2*pi*Frequency*1s" — implicit mul on "1s" after explicit chain
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        freq = np.asarray([1.0, 10.0, 100.0])
+        variables = {"Frequency": freq}
+        tree = parser.parse_expression("2*pi*Frequency*1s")
+        # act — s is the SI suffix constant (1.0); result = 2*pi*Frequency*1*1.0
+        result = evaluator.evaluate(tree, variables)
+        # assert
+        np.testing.assert_array_almost_equal(result, 2 * np.pi * freq * 1.0)
+
     # ------------------------------------------------------------------ #
     # User-defined functions (.func directives)                          #
     # ------------------------------------------------------------------ #

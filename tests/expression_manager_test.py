@@ -252,3 +252,76 @@ class TestExpressionManager(TestCase):
         manager.evaluate("2 * V(R1)")
         # assert
         self.assertEqual(len(manager.expressions), expected_len)
+
+    # ------------------------------------------------------------------ #
+    # User-defined functions (.func directives)                          #
+    # ------------------------------------------------------------------ #
+
+    def test_func_definition_is_callable_in_expressions(self):
+        # arrange
+        expr = Expression("V(R1)", np.array([1.0, 2.0, 3.0]), "V")
+        manager = ExpressionManager([expr], [".func DOUBLE(x) {x * 2}"])
+        # act
+        result = manager.evaluate("DOUBLE(V(R1))")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, [2.0, 4.0, 6.0])
+
+    def test_func_definition_is_case_insensitive_at_call_site(self):
+        # arrange
+        expr = Expression("V(R1)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr], [".func GAIN(x) {x * 10}"])
+        # act
+        result = manager.evaluate("gain(V(R1))")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, [10.0, 20.0])
+
+    def test_func_definition_unit_propagation_preserves_voltage(self):
+        # arrange — DOUBLE(x) {x * 2}: scaling a voltage must return voltage
+        expr = Expression("V(R1)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr], [".func DOUBLE(x) {x * 2}"])
+        # act
+        result = manager.evaluate("DOUBLE(V(R1))")
+        # assert
+        self.assertEqual(result.unit, "V")
+
+    def test_func_definition_unit_propagation_power(self):
+        # arrange — POWER(v, i) {v * i}: V * A should give W
+        expr_v = Expression("V(R1)", np.array([2.0, 4.0]), "V")
+        expr_i = Expression("I(R1)", np.array([1.0, 2.0]), "A")
+        manager = ExpressionManager([expr_v, expr_i], [".func POWER(v, i) {v * i}"])
+        # act
+        result = manager.evaluate("POWER(V(R1), I(R1))")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, [2.0, 8.0])
+        self.assertEqual(result.unit, "W")
+
+    def test_func_definition_calling_another_func(self):
+        # arrange — F2 calls F1; both definitions passed together
+        expr = Expression("V(R1)", np.array([5.0, 10.0]), "V")
+        manager = ExpressionManager([expr], [".func F1(x) {x + 1}", ".func F2(y) {F1(y) * 2}"])
+        # act
+        result = manager.evaluate("F2(V(R1))")
+        # assert — F2(5)=(5+1)*2=12, F2(10)=(10+1)*2=22
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, [12.0, 22.0])
+
+    def test_func_invalid_definition_is_skipped_gracefully(self):
+        # arrange — a malformed .func must not prevent the manager from constructing
+        expr = Expression("V(R1)", np.array([1.0]), "V")
+        manager = ExpressionManager([expr], [".func BAD( {1}"])
+        # act — valid expressions must still work
+        result = manager.evaluate("V(R1)")
+        # assert
+        self.assertIsNotNone(result)
+
+    def test_func_unknown_call_after_func_registration_returns_none(self):
+        # arrange — only DOUBLE is registered; calling TRIPLE must fail gracefully
+        expr = Expression("V(R1)", np.array([1.0]), "V")
+        manager = ExpressionManager([expr], [".func DOUBLE(x) {x * 2}"])
+        # act
+        result = manager.evaluate("TRIPLE(V(R1))")
+        # assert
+        self.assertIsNone(result)

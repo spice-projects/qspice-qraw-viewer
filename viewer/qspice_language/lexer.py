@@ -11,6 +11,7 @@ _SINGLE_CHAR_TOKENS: dict[str, TokenKind] = {
     ",": TokenKind.COMMA,
     "?": TokenKind.QUESTION,
     ":": TokenKind.COLON,
+    "@": TokenKind.AT,
     "+": TokenKind.PLUS,
     "-": TokenKind.MINUS,
     "*": TokenKind.STAR,

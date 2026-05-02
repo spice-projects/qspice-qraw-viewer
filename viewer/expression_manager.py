@@ -4,7 +4,7 @@ import numpy as np
 
 from .expression import Expression
 from .qspice_language.evaluator import QspiceEvaluator
-from .qspice_language.nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, IdentifierNode, NumberNode, TernaryOperationNode, UnaryOperationNode
+from .qspice_language.nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, TernaryOperationNode, UnaryOperationNode
 from .qspice_language.parser import QspiceParser
 
 logger = logging.getLogger(__name__)
@@ -23,16 +23,25 @@ class ExpressionManager:
         "n": "",
         "p": "",
         "pi": "",
+            "s": "s",
         "t": "",
         "u": "",
     }
 
-    def __init__(self, expressions: list[Expression]):
+    def __init__(self, expressions: list[Expression], function_definitions: list[str] | None = None):
         # create expression context; keys are lowercased so that evaluate() lookups always match
         self._context: dict[str, Expression] = {expression.name.lower(): expression for expression in expressions}
         # initialize the qspice language parser and evaluator for expression data
         self._parser = QspiceParser()
         self._evaluator = QspiceEvaluator()
+        # parse user-defined .func definitions; keys are lowercased for case-insensitive lookup
+        self._functions: dict[str, FunctionDefinitionNode] = {}
+        for func_text in (function_definitions or []):
+            try:
+                definition = self._parser.parse_function_definition(func_text)
+                self._functions[definition.name.casefold()] = definition
+            except ValueError as e:
+                logger.warning("Failed to parse .func definition %r: %s", func_text, e)
 
     @property
     def expressions(self) -> list[Expression]:
@@ -51,7 +60,7 @@ class ExpressionManager:
                 # build qspice variable context from cached expressions
                 data_context = {context_key: context_expression.data for context_key, context_expression in self._context.items()}
                 # evaluate qspice AST to get computed numeric data
-                evaluated_data = self._evaluator.evaluate(ast, data_context)
+                evaluated_data = self._evaluator.evaluate(ast, data_context, self._functions)
                 # build unit lookup context from cached expressions
                 unit_context = {context_key: context_expression.unit for context_key, context_expression in self._context.items()}
                 # infer propagated unit from the qspice AST
@@ -89,6 +98,10 @@ class ExpressionManager:
             # resolve probe units using probe references
             if function_name in ("v", "i", "id"):
                 return self._unit_for_probe(node, unit_context)
+            # delegate unit inference to user-defined function body
+            definition = self._functions.get(function_name)
+            if definition is not None:
+                return self._infer_user_function_unit(definition, node, unit_context)
             # dimensionless fallback for nullary calls
             if len(node.args) == 0:
                 return ""
@@ -128,6 +141,14 @@ class ExpressionManager:
             return "(" + self._format_expression(node.condition) + "?" + self._format_expression(node.if_true) + ":" + self._format_expression(node.if_false) + ")"
         # fallback for unknown nodes
         return ""
+
+    def _infer_user_function_unit(self, definition: FunctionDefinitionNode, call: FunctionCallNode, unit_context: dict[str, str]) -> str:
+        # build a unit context that maps each parameter name to the unit of the corresponding argument
+        local_unit_context = dict(unit_context)
+        for param, arg in zip(definition.params, call.args):
+            local_unit_context[param.casefold()] = self._infer_unit(arg, unit_context)
+        # infer unit by walking the function body with the local context
+        return self._infer_unit(definition.body, local_unit_context)
 
     def _unit_for_identifier(self, name: str, unit_context: dict[str, str]) -> str:
         # normalize the identifier lookup key

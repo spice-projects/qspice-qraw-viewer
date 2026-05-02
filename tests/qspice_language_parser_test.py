@@ -55,6 +55,15 @@ class TestQspiceParser(TestCase):
         self.assertEqual(expression.name, "max")
         self.assertEqual(len(expression.args), 2)
 
+    def test_parse_probe_selector_as_identifier(self):
+        # arrange
+        parser = QspiceParser()
+        # act
+        expression = parser.parse_expression("V(INOISE)@1")
+        # assert
+        self.assertIsInstance(expression, IdentifierNode)
+        self.assertEqual(expression.name, "V(INOISE)@1")
+
     def test_parse_precedence_mul_before_add(self):
         # arrange
         parser = QspiceParser()
@@ -119,6 +128,16 @@ class TestQspiceParser(TestCase):
         self.assertEqual(definition.params, ("x", "y"))
         self.assertIsInstance(definition.body, BinaryOperationNode)
         self.assertEqual(definition.body.operator, BinaryOperator.DIV)
+
+    def test_parse_function_definition_with_probe_selectors(self):
+        # arrange
+        parser = QspiceParser()
+        # act
+        definition = parser.parse_function_definition(".func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}")
+        # assert
+        self.assertIsInstance(definition, FunctionDefinitionNode)
+        self.assertEqual(definition.name, "NFDB")
+        self.assertEqual(definition.params, ())
 
     def test_parse_nested_ternary_is_right_associative(self):
         # arrange

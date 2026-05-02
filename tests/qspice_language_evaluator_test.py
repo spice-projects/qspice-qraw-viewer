@@ -99,6 +99,29 @@ class TestQspiceEvaluator(TestCase):
         # assert
         self.assertEqual(result, 5.0)
 
+    def test_evaluate_probe_selector_lookup(self):
+        # arrange
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        expression = parser.parse_expression("V(INOISE)@1 / V(INOISE)@2")
+        variables = {"V(INOISE)@1": 10.0, "V(INOISE)@2": 2.0}
+        # act
+        result = evaluator.evaluate(expression, variables=variables)
+        # assert
+        self.assertEqual(result, 5.0)
+
+    def test_evaluate_user_defined_function_with_probe_selectors(self):
+        # arrange
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}")
+        expression = parser.parse_expression("NFDB()")
+        variables = {"V(INOISE)@1": 10.0, "V(INOISE)@2": 2.0}
+        # act
+        result = evaluator.evaluate(expression, variables=variables, functions={definition.name: definition})
+        # assert
+        self.assertAlmostEqual(result, 20.0 * np.log10(5.0))
+
     def test_evaluate_recursive_function_raises_error(self):
         # arrange
         parser = QspiceParser()

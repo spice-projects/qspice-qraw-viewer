@@ -104,4 +104,4 @@ class TestQspiceLexer(TestCase):
         lexer = QspiceLexer()
         # act / assert
         with self.assertRaises(ValueError):
-            lexer.tokenize("x @ y")
+            lexer.tokenize("x % y")

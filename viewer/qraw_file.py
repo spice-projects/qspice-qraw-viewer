@@ -319,6 +319,8 @@ class QRawFile:
             pos = 0
             # aliases
             aliasses: dict[str, str] = {}
+            # user-defined function definitions (.func directives)
+            func_definitions: list[str] = []
             # process file bytes
             while pos < len(data):
                 # find \n
@@ -376,6 +378,10 @@ class QRawFile:
                     if len(parts) == 3:
                         # append to aliasses
                         aliasses[parts[1]] = parts[2]
+                # user-defined function directive
+                if line.startswith(".func"):
+                    # store the raw directive text for the expression manager to parse
+                    func_definitions.append(line)
             # validate that we found the binary section
             if binary_offset < 0:
                 # log error
@@ -409,8 +415,8 @@ class QRawFile:
                 matrix = flat.reshape(num_points, num_variables)
                 # extract variables
                 variables = [Expression(name, matrix[:, idx], var_type.value.unit, source=None, variable_type=var_type.value.name) for idx, name, var_type in variable_definitions]
-            # create expression manager
-            expression_manager = ExpressionManager(variables)
+            # create expression manager, passing any user-defined .func definitions
+            expression_manager = ExpressionManager(variables, func_definitions if func_definitions else None)
             # process aliasses
             if len(aliasses) > 0:
                 # loop aliasses
