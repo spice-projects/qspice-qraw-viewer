@@ -125,7 +125,18 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
     # parameter expressions
     parameters = [expr for expr in expressions if expr.variable_type == "parameter"]
     if len(parameters) == 0:
-        # treat as unstepped
+        # no parameter variables — try to detect steps from abscissa resets (e.g. NoiseFigure-style: repeated sweeps)
+        if num_points > 1:
+            abscissa_data = abscissa.data
+            # a new step starts wherever the abscissa value drops (ascending sweep restarts)
+            boundaries = np.flatnonzero(abscissa_data[1:] < abscissa_data[:-1]) + 1
+            if len(boundaries) > 0:
+                starts_list = [0] + boundaries.astype(int).tolist()
+                ends_list = boundaries.astype(int).tolist() + [num_points]
+                abscissa_indices = [slice(s, e) for s, e in zip(starts_list, ends_list)]
+                abscissa_value_ranges = [(float(abscissa_data[step_slice.start]), float(abscissa_data[step_slice.stop - 1])) for step_slice in abscissa_indices]
+                return StepInformation(keys=[], values=[], abscissa_indices=abscissa_indices, abscissa_value_ranges=abscissa_value_ranges)
+        # no resets detected — treat as unstepped
         return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
     # stack all parameter values into a matrix (num_points, num_parameters)
     stacked = np.column_stack([expression.data for expression in parameters]) if len(parameters) > 1 else parameters[0].data.reshape(-1, 1)

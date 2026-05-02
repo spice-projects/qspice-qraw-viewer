@@ -549,22 +549,56 @@ class TestProcessSteps(TestCase):
         self.assertEqual(result.keys, [])
         self.assertEqual(result.values, [])
 
-    def test_stepped_no_parameters_returns_single_step(self):
-        # arrange
+    def test_stepped_no_parameters_monotonic_abscissa_returns_single_step(self):
+        # arrange — abscissa never resets so no step boundary is detectable
         stepped = True
         expr_voltage = Expression("V(out)", np.array([1.0, 2.0, 3.0]), "V", variable_type="voltage")
         expressions = [expr_voltage]
         num_points = 3
         # act
         result = _process_steps(stepped, expressions, expr_voltage, num_points)
-        # assert
+        # assert — single step because abscissa is strictly increasing (no resets)
         self.assertEqual(result.length, 1)
         self.assertEqual(result.abscissa_indices[0], slice(0, 3))
         self.assertEqual(result.abscissa_indices[0].stop - result.abscissa_indices[0].start, 3)
         self.assertEqual(result.keys, [])
         self.assertEqual(result.values, [])
 
-    def test_stepped_single_parameter_two_steps(self):
+    def test_stepped_no_parameters_abscissa_reset_detects_two_steps(self):
+        # arrange — NoiseFigure-style: same frequency sweep repeated twice (no parameter variables)
+        # abscissa: [10, 20, 30, 10, 20, 30] — resets after point index 2
+        stepped = True
+        abscissa_data = np.array([10.0, 20.0, 30.0, 10.0, 20.0, 30.0])
+        expr_abscissa = Expression("Frequency", abscissa_data, "Hz", variable_type="frequency")
+        expr_voltage = Expression("V(inoise_spectrum)", np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), "V", variable_type="voltage")
+        expressions = [expr_abscissa, expr_voltage]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, expr_abscissa, num_points)
+        # assert — two equal-length steps detected from abscissa reset
+        self.assertEqual(result.length, 2)
+        self.assertEqual(result.abscissa_indices[0], slice(0, 3))
+        self.assertEqual(result.abscissa_indices[1], slice(3, 6))
+        self.assertEqual(result.keys, [])
+        self.assertEqual(result.values, [])
+
+    def test_stepped_no_parameters_abscissa_reset_detects_three_steps(self):
+        # arrange — three identical frequency sweeps with no parameter variables
+        stepped = True
+        abscissa_data = np.array([1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0])
+        expr_abscissa = Expression("Frequency", abscissa_data, "Hz", variable_type="frequency")
+        expr_voltage = Expression("V(inoise_spectrum)", np.ones(9), "V", variable_type="voltage")
+        expressions = [expr_abscissa, expr_voltage]
+        num_points = 9
+        # act
+        result = _process_steps(stepped, expressions, expr_abscissa, num_points)
+        # assert — three equal-length steps
+        self.assertEqual(result.length, 3)
+        self.assertEqual(result.abscissa_indices[0], slice(0, 3))
+        self.assertEqual(result.abscissa_indices[1], slice(3, 6))
+        self.assertEqual(result.abscissa_indices[2], slice(6, 9))
+
+
         # arrange
         stepped = True
         param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
