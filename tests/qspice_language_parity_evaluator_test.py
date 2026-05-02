@@ -1,18 +1,3 @@
-"""
-Parity tests: Port expression_evaluator_test.py cases to qspice_language evaluator.
-
-These tests validate that the new qspice_language evaluator can handle all
-numeric expressions that the existing expression_evaluator.py supports.
-
-Note: The new evaluator has a simplified interface:
-- Returns numpy arrays directly (not Expression objects)
-- No unit propagation (yet)
-- No SPICE probe differential decomposition (yet)
-
-Tests are adapted to work with the new interface while validating parity
-on numeric results where semantically equivalent.
-"""
-
 from unittest import TestCase
 
 import numpy as np
@@ -592,3 +577,136 @@ class TestQspiceEvaluatorParity(TestCase):
         result = evaluator.evaluate(tree, {})
         # assert
         self.assertAlmostEqual(float(result), 2 * np.pi)
+
+    # ------------------------------------------------------------------ #
+    # User-defined functions (.func directives)                          #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_user_defined_no_params(self):
+        # arrange — .func CONST() {42} defines a zero-argument function
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func CONST() {42}")
+        functions = {"const": definition}
+        tree = parser.parse_expression("CONST()")
+        # act
+        result = evaluator.evaluate(tree, {}, functions)
+        # assert
+        self.assertAlmostEqual(float(result), 42.0)
+
+    def test_evaluate_user_defined_single_param(self):
+        # arrange — .func DOUBLE(x) {x * 2}
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func DOUBLE(x) {x * 2}")
+        functions = {"double": definition}
+        var = np.asarray([1.0, 2.0, 3.0])
+        variables = {"V(n)": var}
+        tree = parser.parse_expression("DOUBLE(V(n))")
+        # act
+        result = evaluator.evaluate(tree, variables, functions)
+        # assert
+        np.testing.assert_array_almost_equal(result, [2.0, 4.0, 6.0])
+
+    def test_evaluate_user_defined_two_params(self):
+        # arrange — .func GAIN(x, k) {x * k}
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func GAIN(x, k) {x * k}")
+        functions = {"gain": definition}
+        var = np.asarray([1.0, 2.0, 4.0])
+        variables = {"V(in)": var}
+        tree = parser.parse_expression("GAIN(V(in), 3)")
+        # act
+        result = evaluator.evaluate(tree, variables, functions)
+        # assert
+        np.testing.assert_array_almost_equal(result, [3.0, 6.0, 12.0])
+
+    def test_evaluate_user_defined_with_builtin(self):
+        # arrange — .func RECTIFY(x) {uramp(x)} uses a builtin inside .func
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func RECTIFY(x) {uramp(x)}")
+        functions = {"rectify": definition}
+        var = np.asarray([-3.0, 0.0, 2.0])
+        variables = {"V(n)": var}
+        tree = parser.parse_expression("RECTIFY(V(n))")
+        # act
+        result = evaluator.evaluate(tree, variables, functions)
+        # assert
+        np.testing.assert_array_almost_equal(result, [0.0, 0.0, 2.0])
+
+    def test_evaluate_user_defined_with_ternary(self):
+        # arrange — .func ABS2(x) {x > 0 ? x : -x} — manual absolute value
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func ABS2(x) {x > 0 ? x : -x}")
+        functions = {"abs2": definition}
+        var = np.asarray([-5.0, 0.0, 3.0])
+        variables = {"V(n)": var}
+        tree = parser.parse_expression("ABS2(V(n))")
+        # act
+        result = evaluator.evaluate(tree, variables, functions)
+        # assert
+        np.testing.assert_array_almost_equal(result, [5.0, 0.0, 3.0])
+
+    def test_evaluate_user_defined_calling_another(self):
+        # arrange — F2 calls F1; mutual dependency via functions dict
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        f1 = parser.parse_function_definition(".func F1(x) {x + 1}")
+        f2 = parser.parse_function_definition(".func F2(y) {F1(y) * 2}")
+        functions = {"f1": f1, "f2": f2}
+        tree = parser.parse_expression("F2(5)")
+        # act
+        result = evaluator.evaluate(tree, {}, functions)
+        # assert — F2(5) = F1(5) * 2 = 6 * 2 = 12
+        self.assertAlmostEqual(float(result), 12.0)
+
+    def test_evaluate_user_defined_recursive_raises(self):
+        # arrange — a self-referencing function must raise ValueError
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func INF(x) {INF(x)}")
+        functions = {"inf": definition}
+        tree = parser.parse_expression("INF(1)")
+        # act / assert
+        with self.assertRaises(ValueError):
+            evaluator.evaluate(tree, {}, functions)
+
+    def test_evaluate_user_defined_wrong_arg_count_raises(self):
+        # arrange — calling with wrong number of arguments must raise ValueError
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func FOO(x, y) {x + y}")
+        functions = {"foo": definition}
+        tree = parser.parse_expression("FOO(1)")
+        # act / assert
+        with self.assertRaises(ValueError):
+            evaluator.evaluate(tree, {}, functions)
+
+    def test_evaluate_user_defined_case_insensitive_call(self):
+        # arrange — function defined as UPPER but called in lowercase
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func SCALE(x) {x * 10}")
+        functions = {"scale": definition}
+        var = np.asarray([1.0, 2.0, 3.0])
+        variables = {"V(n)": var}
+        tree = parser.parse_expression("scale(V(n))")
+        # act
+        result = evaluator.evaluate(tree, variables, functions)
+        # assert
+        np.testing.assert_array_almost_equal(result, [10.0, 20.0, 30.0])
+
+    def test_evaluate_user_defined_with_si_suffix_in_body(self):
+        # arrange — .func MILLIAMP(x) {x * 1e-3} scales to milliamps
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        definition = parser.parse_function_definition(".func MILLIAMP(x) {x * 1e-3}")
+        functions = {"milliamp": definition}
+        tree = parser.parse_expression("MILLIAMP(5)")
+        # act
+        result = evaluator.evaluate(tree, {}, functions)
+        # assert — 5 * 1e-3 = 0.005
+        self.assertAlmostEqual(float(result), 0.005)

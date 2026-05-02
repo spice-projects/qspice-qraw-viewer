@@ -1,11 +1,3 @@
-"""
-Parity tests: Port expression_parser_test.py cases to qspice_language parser.
-
-These tests validate that the new qspice_language parser can handle all
-expressions that the existing expression_parser.py supports, ensuring
-semantic equivalence where possible.
-"""
-
 from unittest import TestCase
 
 from viewer.qspice_language.nodes import BinaryOperationNode, BinaryOperator, FunctionCallNode, IdentifierNode, NumberNode, UnaryOperationNode, UnaryOperator
