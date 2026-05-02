@@ -6,6 +6,7 @@ from viewer.qspice_language.nodes import FunctionCallNode
 from viewer.qspice_language.nodes import FunctionDefinitionNode
 from viewer.qspice_language.nodes import IdentifierNode
 from viewer.qspice_language.nodes import NumberNode
+from viewer.qspice_language.nodes import StepSelectorNode
 from viewer.qspice_language.nodes import TernaryOperationNode
 from viewer.qspice_language.nodes import UnaryOperationNode
 from viewer.qspice_language.nodes import UnaryOperator
@@ -55,14 +56,16 @@ class TestQspiceParser(TestCase):
         self.assertEqual(expression.name, "max")
         self.assertEqual(len(expression.args), 2)
 
-    def test_parse_probe_selector_as_identifier(self):
+    def test_parse_probe_selector_as_step_selector_node(self):
         # arrange
         parser = QspiceParser()
         # act
         expression = parser.parse_expression("V(INOISE)@1")
-        # assert
-        self.assertIsInstance(expression, IdentifierNode)
-        self.assertEqual(expression.name, "V(INOISE)@1")
+        # assert — @N is now a StepSelectorNode, not a folded string identifier
+        self.assertIsInstance(expression, StepSelectorNode)
+        self.assertEqual(expression.step_index, 1)
+        self.assertIsInstance(expression.base, FunctionCallNode)
+        self.assertEqual(expression.base.name, "V")
 
     def test_parse_precedence_mul_before_add(self):
         # arrange
@@ -134,7 +137,7 @@ class TestQspiceParser(TestCase):
         parser = QspiceParser()
         # act
         definition = parser.parse_function_definition(".func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}")
-        # assert
+        # assert — body must contain StepSelectorNodes for the two step references
         self.assertIsInstance(definition, FunctionDefinitionNode)
         self.assertEqual(definition.name, "NFDB")
         self.assertEqual(definition.params, ())
@@ -154,3 +157,76 @@ class TestQspiceParser(TestCase):
         # act / assert
         with self.assertRaises(ValueError):
             parser.parse_expression("max(a, 2")
+
+    # ------------------------------------------------------------------ #
+    # Step selectors (@N)                                                  #
+    # ------------------------------------------------------------------ #
+
+    def test_parse_step_selector_on_probe_produces_step_selector_node(self):
+        # arrange
+        parser = QspiceParser()
+        # act
+        expression = parser.parse_expression("V(INOISE)@2")
+        # assert
+        self.assertIsInstance(expression, StepSelectorNode)
+        self.assertEqual(expression.step_index, 2)
+        self.assertIsInstance(expression.base, FunctionCallNode)
+        self.assertEqual(expression.base.name, "V")
+
+    def test_parse_step_selector_on_identifier_produces_step_selector_node(self):
+        # arrange
+        parser = QspiceParser()
+        # act
+        expression = parser.parse_expression("gain@3")
+        # assert
+        self.assertIsInstance(expression, StepSelectorNode)
+        self.assertEqual(expression.step_index, 3)
+        self.assertIsInstance(expression.base, IdentifierNode)
+        self.assertEqual(expression.base.name, "gain")
+
+    def test_parse_step_selector_index_one(self):
+        # arrange — @1 is the minimum valid step index
+        parser = QspiceParser()
+        # act
+        expression = parser.parse_expression("V(a)@1")
+        # assert
+        self.assertIsInstance(expression, StepSelectorNode)
+        self.assertEqual(expression.step_index, 1)
+
+    def test_parse_step_selector_zero_raises_error(self):
+        # arrange — @0 is invalid: step indices are 1-based
+        parser = QspiceParser()
+        # act / assert
+        with self.assertRaises(ValueError):
+            parser.parse_expression("V(a)@0")
+
+    def test_parse_step_selector_in_expression_tree(self):
+        # arrange — V(INOISE)@1/V(INOISE)@2 should produce a division of two selectors
+        parser = QspiceParser()
+        # act
+        expression = parser.parse_expression("V(INOISE)@1/V(INOISE)@2")
+        # assert
+        self.assertIsInstance(expression, BinaryOperationNode)
+        self.assertEqual(expression.operator, BinaryOperator.DIV)
+        self.assertIsInstance(expression.left, StepSelectorNode)
+        self.assertEqual(expression.left.step_index, 1)
+        self.assertIsInstance(expression.right, StepSelectorNode)
+        self.assertEqual(expression.right.step_index, 2)
+
+    def test_parse_nfdb_func_definition_body_contains_step_selectors(self):
+        # arrange — real-world NoiseFigure.qraw example
+        parser = QspiceParser()
+        # act
+        definition = parser.parse_function_definition(".func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}")
+        # assert — body is a binary expression whose LOG10 argument is a division of two selectors
+        self.assertIsInstance(definition.body, BinaryOperationNode)
+        self.assertEqual(definition.body.operator, BinaryOperator.MUL)
+        log_call = definition.body.right
+        self.assertIsInstance(log_call, FunctionCallNode)
+        ratio = log_call.args[0]
+        self.assertIsInstance(ratio, BinaryOperationNode)
+        self.assertEqual(ratio.operator, BinaryOperator.DIV)
+        self.assertIsInstance(ratio.left, StepSelectorNode)
+        self.assertEqual(ratio.left.step_index, 1)
+        self.assertIsInstance(ratio.right, StepSelectorNode)
+        self.assertEqual(ratio.right.step_index, 2)

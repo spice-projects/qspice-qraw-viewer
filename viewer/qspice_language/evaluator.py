@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from .builtins import BUILTIN_CONSTANTS, BUILTIN_FUNCTIONS, QspiceValue
-from .nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, TernaryOperationNode, UnaryOperationNode, UnaryOperator
+from .nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, StepSelectorNode, TernaryOperationNode, UnaryOperationNode, UnaryOperator
 
 
 _NUMBER_SUFFIXES: dict[str, float] = {
@@ -28,13 +28,15 @@ class EvaluationContext:
     variables: dict[str, QspiceValue]
     functions: dict[str, FunctionDefinitionNode]
     constants: dict[str, QspiceValue]
+    # optional step slices for @N selector support; each slice gives the index range for one step
+    step_slices: tuple[slice, ...] | None = None
 
 
 class QspiceEvaluator:
 
-    def evaluate(self, expression: ExpressionNode, variables: dict[str, Any] | None = None, functions: dict[str, FunctionDefinitionNode] | None = None, constants: dict[str, Any] | None = None) -> Any:
+    def evaluate(self, expression: ExpressionNode, variables: dict[str, Any] | None = None, functions: dict[str, FunctionDefinitionNode] | None = None, constants: dict[str, Any] | None = None, step_slices: tuple[slice, ...] | None = None) -> Any:
         # build the evaluation context
-        context = EvaluationContext(self._normalize_value_mapping(variables), self._normalize_function_mapping(functions), self._normalize_value_mapping(constants, BUILTIN_CONSTANTS))
+        context = EvaluationContext(self._normalize_value_mapping(variables), self._normalize_function_mapping(functions), self._normalize_value_mapping(constants, BUILTIN_CONSTANTS), step_slices)
         # evaluate the expression tree
         result = self._evaluate(expression, context, ())
         # convert the internal value to a public result
@@ -59,6 +61,9 @@ class QspiceEvaluator:
         # evaluate a function call
         if isinstance(expression, FunctionCallNode):
             return self._evaluate_function_call(expression, context, call_stack)
+        # evaluate a step selector (@N)
+        if isinstance(expression, StepSelectorNode):
+            return self._evaluate_step_selector(expression, context, call_stack)
         # fail on an unsupported node type
         raise ValueError(f"Unsupported expression node: {type(expression).__name__}")
 
@@ -168,8 +173,8 @@ class QspiceEvaluator:
         # bind argument values to parameter names
         for param, arg in zip(definition.params, expression.args):
             local_variables[param.casefold()] = self._evaluate(arg, context, call_stack)
-        # build the local evaluation context
-        local_context = EvaluationContext(local_variables, context.functions, context.constants)
+        # build the local evaluation context; propagate step_slices so @N works inside function bodies
+        local_context = EvaluationContext(local_variables, context.functions, context.constants, context.step_slices)
         # evaluate the function body
         return self._evaluate(definition.body, local_context, call_stack + (function_name,))
 
@@ -205,6 +210,21 @@ class QspiceEvaluator:
                 return value_a
         # fail if probe not found
         raise ValueError(f"Unknown probe: {probe_name}")
+
+    def _evaluate_step_selector(self, expression: StepSelectorNode, context: EvaluationContext, call_stack: tuple[str, ...]) -> QspiceValue:
+        # require step slice information in the evaluation context
+        if context.step_slices is None:
+            raise ValueError("Step selector @N requires step metadata in the evaluation context")
+        # validate the step index against the available slices (1-based)
+        num_steps = len(context.step_slices)
+        if expression.step_index < 1 or expression.step_index > num_steps:
+            raise ValueError(f"Step selector @{expression.step_index} is out of range: file has {num_steps} step(s)")
+        # evaluate the base expression using the full data context
+        base_value = self._evaluate(expression.base, context, call_stack)
+        # extract the step slice (convert from 1-based to 0-based index)
+        step_slice = context.step_slices[expression.step_index - 1]
+        # extract and return the selected step data
+        return base_value[step_slice]
 
     @staticmethod
     def _reconstruct_probe_name(expression: FunctionCallNode) -> str:
@@ -347,6 +367,6 @@ class QspiceEvaluator:
         return np.asarray(value)
 
 
-def evaluate_expression(expression: ExpressionNode, variables: dict[str, Any] | None = None, functions: dict[str, FunctionDefinitionNode] | None = None, constants: dict[str, Any] | None = None) -> Any:
+def evaluate_expression(expression: ExpressionNode, variables: dict[str, Any] | None = None, functions: dict[str, FunctionDefinitionNode] | None = None, constants: dict[str, Any] | None = None, step_slices: tuple[slice, ...] | None = None) -> Any:
     # evaluate an expression with a fresh evaluator instance
-    return QspiceEvaluator().evaluate(expression, variables, functions, constants)
+    return QspiceEvaluator().evaluate(expression, variables, functions, constants, step_slices)

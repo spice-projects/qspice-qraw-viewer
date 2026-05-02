@@ -71,14 +71,22 @@ class TernaryOperationNode:
 
 
 @dataclass(frozen=True)
+class StepSelectorNode:
+    """Postfix step selector: base@N selects the data slice for step N (1-based)."""
+
+    base: "ExpressionNode"
+    step_index: int
+
+
+@dataclass(frozen=True)
 class FunctionDefinitionNode:
 
     name: str
     params: tuple[str, ...]
-    body: ExpressionNode
+    body: "ExpressionNode"
 
 
-ExpressionNode = NumberNode | IdentifierNode | FunctionCallNode | UnaryOperationNode | BinaryOperationNode | TernaryOperationNode
+ExpressionNode = NumberNode | IdentifierNode | FunctionCallNode | UnaryOperationNode | BinaryOperationNode | TernaryOperationNode | StepSelectorNode
 
 
 __all__ = [
@@ -89,6 +97,7 @@ __all__ = [
     "FunctionDefinitionNode",
     "IdentifierNode",
     "NumberNode",
+    "StepSelectorNode",
     "TernaryOperationNode",
     "UnaryOperationNode",
     "UnaryOperator",

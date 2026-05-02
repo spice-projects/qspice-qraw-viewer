@@ -415,8 +415,14 @@ class QRawFile:
                 matrix = flat.reshape(num_points, num_variables)
                 # extract variables
                 variables = [Expression(name, matrix[:, idx], var_type.value.unit, source=None, variable_type=var_type.value.name) for idx, name, var_type in variable_definitions]
-            # create expression manager, passing any user-defined .func definitions
-            expression_manager = ExpressionManager(variables, func_definitions if func_definitions else None)
+            # process scale (x axis) before step detection so abscissa values are correct
+            abscissa = _process_scale(variables[0], abscissa_scale)
+            # process steps using the scaled abscissa values — slices are needed by the expression manager for @N
+            step_information = _process_steps(stepped, variables, abscissa, num_points)
+            # build step slices tuple for @N selector support in .func definitions
+            step_slices: tuple[slice, ...] | None = tuple(step_information.abscissa_indices) if step_information.length > 1 else None
+            # create expression manager, passing any user-defined .func definitions and step slice metadata
+            expression_manager = ExpressionManager(variables, func_definitions if func_definitions else None, step_slices)
             # process aliasses
             if len(aliasses) > 0:
                 # loop aliasses
@@ -427,10 +433,6 @@ class QRawFile:
                     except Exception as ex:
                         # log error but continue processing other aliasses
                         logger.error("Failed to evaluate expression '%s': %s", alias_name, ex)
-            # process scale (x axis)
-            abscissa = _process_scale(variables[0], abscissa_scale)
-            # process steps in stepped files using the scaled abscissa values
-            step_information = _process_steps(stepped, variables, abscissa, num_points)
             # create QRawFile instance with parsed header, variables, and binary data; pass the mmap so it stays alive for the lifetime of the QRawFile — Variable arrays are views into it
             return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, step_information=step_information, abscissa=abscissa, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), expression_manager=expression_manager, _mmap=data)
         finally:

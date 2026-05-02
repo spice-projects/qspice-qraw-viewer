@@ -325,3 +325,74 @@ class TestExpressionManager(TestCase):
         result = manager.evaluate("TRIPLE(V(R1))")
         # assert
         self.assertIsNone(result)
+
+    # ------------------------------------------------------------------ #
+    # Step selectors (@N) via ExpressionManager                          #
+    # ------------------------------------------------------------------ #
+
+    def test_step_selector_expression_picks_correct_step(self):
+        # arrange — 4-point waveform, two steps of 2 points; @1 should return step 1 rematerialized
+        expr = Expression("V(out)", np.array([1.0, 2.0, 10.0, 20.0]), "V")
+        step_slices = (slice(0, 2), slice(2, 4))
+        manager = ExpressionManager([expr], step_slices=step_slices)
+        # act
+        result = manager.evaluate("V(out)@1")
+        # assert — step 1 is [1, 2]; rematerialized across 2 steps → [1, 2, 1, 2]
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.data), 4)
+        np.testing.assert_array_almost_equal(result.data, np.array([1.0, 2.0, 1.0, 2.0]))
+
+    def test_step_selector_unit_is_preserved(self):
+        # arrange — voltage variable, @N must not change the unit
+        expr = Expression("V(out)", np.array([1.0, 2.0, 3.0, 4.0]), "V")
+        step_slices = (slice(0, 2), slice(2, 4))
+        manager = ExpressionManager([expr], step_slices=step_slices)
+        # act
+        result = manager.evaluate("V(out)@1")
+        # assert
+        self.assertEqual(result.unit, "V")
+
+    def test_step_selector_ratio_rematerialized_to_full_length(self):
+        # arrange — NFDB-style ratio: step1/step2 per frequency, rematerialized to 4 points
+        expr = Expression("V(inoise)", np.array([10.0, 20.0, 2.0, 4.0]), "V")
+        step_slices = (slice(0, 2), slice(2, 4))
+        manager = ExpressionManager([expr], step_slices=step_slices)
+        # act
+        result = manager.evaluate("V(inoise)@1 / V(inoise)@2")
+        # assert — ratio is [10/2, 20/4] = [5, 5]; tiled to 4 points → [5, 5, 5, 5]
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.data), 4)
+        np.testing.assert_array_almost_equal(result.data, np.array([5.0, 5.0, 5.0, 5.0]))
+
+    def test_step_selector_func_nfdb_evaluates_to_full_length(self):
+        # arrange — real-world NoiseFigure.qraw: .func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}
+        expr = Expression("V(inoise)", np.array([10.0, 2.0]), "V")
+        step_slices = (slice(0, 1), slice(1, 2))
+        manager = ExpressionManager([expr], [".func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}"], step_slices)
+        # act
+        result = manager.evaluate("NFDB()")
+        # assert — 20*log10(10/2) tiled to 2 points
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.data), 2)
+        np.testing.assert_array_almost_equal(result.data, np.full(2, 20.0 * np.log10(5.0)))
+
+    def test_step_selector_without_step_slices_returns_none(self):
+        # arrange — no step metadata; @N selector cannot be evaluated
+        expr = Expression("V(out)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr])
+        # act
+        result = manager.evaluate("V(out)@1")
+        # assert — must fail gracefully and return None
+        self.assertIsNone(result)
+
+    def test_step_selector_non_stepped_expression_unchanged(self):
+        # arrange — plain expression without @N must be unaffected by step_slices presence
+        expr = Expression("V(R1)", np.array([1.0, 2.0, 3.0, 4.0]), "V")
+        step_slices = (slice(0, 2), slice(2, 4))
+        manager = ExpressionManager([expr], step_slices=step_slices)
+        # act
+        result = manager.evaluate("2 * V(R1)")
+        # assert — full-length array unchanged
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.data), 4)
+        np.testing.assert_array_almost_equal(result.data, np.array([2.0, 4.0, 6.0, 8.0]))

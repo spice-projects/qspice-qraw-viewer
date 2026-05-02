@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .lexer import tokenize
-from .nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, TernaryOperationNode, UnaryOperationNode, UnaryOperator
+from .nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, StepSelectorNode, TernaryOperationNode, UnaryOperationNode, UnaryOperator
 from .tokens import Token, TokenKind
 
 
@@ -267,28 +267,24 @@ class QspiceParser:
         raise ValueError(f"Unexpected token {token.text!r} at offset {token.start}")
 
     def _parse_postfix_reference(self, expression: ExpressionNode) -> ExpressionNode:
-        # support probe selectors such as V(INOISE)@1 by collapsing them into a direct identifier
+        # support probe selectors such as V(INOISE)@1 as a StepSelectorNode
         if self._peek().kind != TokenKind.AT:
-            return expression
-        base_text = self._reference_text(expression)
-        if base_text is None:
             return expression
         self._consume(TokenKind.AT)
         suffix = self._peek()
-        if suffix.kind not in (TokenKind.NUMBER, TokenKind.IDENTIFIER):
-            raise ValueError(f"Expected selector after @ at offset {suffix.start}")
-        selector = self._consume(suffix.kind).text
-        return IdentifierNode(base_text + "@" + selector)
-
-    def _reference_text(self, expression: ExpressionNode) -> str | None:
-        # serialize simple references so they can be used as direct lookup keys
-        if isinstance(expression, IdentifierNode):
-            return expression.name
-        if isinstance(expression, NumberNode):
-            return expression.text
-        if isinstance(expression, FunctionCallNode):
-            return expression.name + "(" + ",".join(self._reference_text(arg) or "" for arg in expression.args) + ")"
-        return None
+        # require a numeric step index after @
+        if suffix.kind != TokenKind.NUMBER:
+            raise ValueError(f"Expected numeric step index after @ at offset {suffix.start}")
+        selector_text = self._consume(TokenKind.NUMBER).text
+        # parse the step index as a positive integer
+        try:
+            step_index = int(selector_text)
+        except ValueError:
+            raise ValueError(f"Step selector @{selector_text!r} is not a valid integer")
+        # reject zero and negative step indices (1-based QSPICE convention)
+        if step_index < 1:
+            raise ValueError(f"Step selector @{step_index} is out of range: must be >= 1")
+        return StepSelectorNode(expression, step_index)
 
     def _parse_argument_list(self) -> list[ExpressionNode]:
         # collect argument expressions

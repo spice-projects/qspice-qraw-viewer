@@ -100,27 +100,30 @@ class TestQspiceEvaluator(TestCase):
         self.assertEqual(result, 5.0)
 
     def test_evaluate_probe_selector_lookup(self):
-        # arrange
+        # arrange — two-step waveform: step 1 = [10.0, 10.0], step 2 = [2.0, 2.0]
         parser = QspiceParser()
         evaluator = QspiceEvaluator()
         expression = parser.parse_expression("V(INOISE)@1 / V(INOISE)@2")
-        variables = {"V(INOISE)@1": 10.0, "V(INOISE)@2": 2.0}
+        variables = {"v(inoise)": np.asarray([10.0, 10.0, 2.0, 2.0])}
+        step_slices = (slice(0, 2), slice(2, 4))
         # act
-        result = evaluator.evaluate(expression, variables=variables)
+        result = evaluator.evaluate(expression, variables=variables, step_slices=step_slices)
         # assert
-        self.assertEqual(result, 5.0)
+        np.testing.assert_array_almost_equal(result, np.asarray([5.0, 5.0]))
 
     def test_evaluate_user_defined_function_with_probe_selectors(self):
-        # arrange
+        # arrange — NFDB computes 20*log10(step1/step2) for a two-step noise waveform
         parser = QspiceParser()
         evaluator = QspiceEvaluator()
         definition = parser.parse_function_definition(".func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}")
         expression = parser.parse_expression("NFDB()")
-        variables = {"V(INOISE)@1": 10.0, "V(INOISE)@2": 2.0}
+        # step 1 = [10.0], step 2 = [2.0]
+        variables = {"v(inoise)": np.asarray([10.0, 2.0])}
+        step_slices = (slice(0, 1), slice(1, 2))
         # act
-        result = evaluator.evaluate(expression, variables=variables, functions={definition.name: definition})
+        result = evaluator.evaluate(expression, variables=variables, functions={definition.name: definition}, step_slices=step_slices)
         # assert
-        self.assertAlmostEqual(result, 20.0 * np.log10(5.0))
+        np.testing.assert_array_almost_equal(result, np.asarray([20.0 * np.log10(5.0)]))
 
     def test_evaluate_recursive_function_raises_error(self):
         # arrange
@@ -140,3 +143,76 @@ class TestQspiceEvaluator(TestCase):
         # act / assert
         with self.assertRaises(ValueError):
             evaluator.evaluate(expression)
+
+    # ------------------------------------------------------------------ #
+    # Step selectors (@N)                                                  #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_step_selector_picks_correct_slice(self):
+        # arrange — 4-point waveform split into two steps of 2 points each
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        expression = parser.parse_expression("V(out)@1")
+        variables = {"v(out)": np.asarray([1.0, 2.0, 10.0, 20.0])}
+        step_slices = (slice(0, 2), slice(2, 4))
+        # act
+        result = evaluator.evaluate(expression, variables=variables, step_slices=step_slices)
+        # assert — @1 selects step 1 (first two points)
+        np.testing.assert_array_equal(result, np.asarray([1.0, 2.0]))
+
+    def test_evaluate_step_selector_second_step(self):
+        # arrange
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        expression = parser.parse_expression("V(out)@2")
+        variables = {"v(out)": np.asarray([1.0, 2.0, 10.0, 20.0])}
+        step_slices = (slice(0, 2), slice(2, 4))
+        # act
+        result = evaluator.evaluate(expression, variables=variables, step_slices=step_slices)
+        # assert — @2 selects step 2 (last two points)
+        np.testing.assert_array_equal(result, np.asarray([10.0, 20.0]))
+
+    def test_evaluate_step_selector_ratio_across_steps(self):
+        # arrange — ratio of step1/step2 (element-wise per-frequency)
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        expression = parser.parse_expression("V(out)@1 / V(out)@2")
+        variables = {"v(out)": np.asarray([10.0, 20.0, 2.0, 4.0])}
+        step_slices = (slice(0, 2), slice(2, 4))
+        # act
+        result = evaluator.evaluate(expression, variables=variables, step_slices=step_slices)
+        # assert — [10/2, 20/4] = [5, 5]
+        np.testing.assert_array_almost_equal(result, np.asarray([5.0, 5.0]))
+
+    def test_evaluate_step_selector_without_step_slices_raises_error(self):
+        # arrange — @N requires step metadata in context; omitting it must raise
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        expression = parser.parse_expression("V(out)@1")
+        variables = {"v(out)": np.asarray([1.0, 2.0])}
+        # act / assert
+        with self.assertRaises(ValueError):
+            evaluator.evaluate(expression, variables=variables)
+
+    def test_evaluate_step_selector_out_of_range_raises_error(self):
+        # arrange — @3 is invalid for a 2-step file
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        expression = parser.parse_expression("V(out)@3")
+        variables = {"v(out)": np.asarray([1.0, 2.0, 3.0, 4.0])}
+        step_slices = (slice(0, 2), slice(2, 4))
+        # act / assert
+        with self.assertRaises(ValueError):
+            evaluator.evaluate(expression, variables=variables, step_slices=step_slices)
+
+    def test_evaluate_step_selector_preserves_unit_through_db(self):
+        # arrange — db(V(out)@1) should still evaluate correctly
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        expression = parser.parse_expression("db(V(out)@1)")
+        variables = {"v(out)": np.asarray([1.0, 10.0, 100.0, 1000.0])}
+        step_slices = (slice(0, 2), slice(2, 4))
+        # act
+        result = evaluator.evaluate(expression, variables=variables, step_slices=step_slices)
+        # assert — db([1, 10]) = [0, 20]
+        np.testing.assert_array_almost_equal(result, np.asarray([0.0, 20.0]))

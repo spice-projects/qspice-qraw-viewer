@@ -4,7 +4,7 @@ import numpy as np
 
 from .expression import Expression
 from .qspice_language.evaluator import QspiceEvaluator
-from .qspice_language.nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, TernaryOperationNode, UnaryOperationNode
+from .qspice_language.nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, StepSelectorNode, TernaryOperationNode, UnaryOperationNode
 from .qspice_language.parser import QspiceParser
 
 logger = logging.getLogger(__name__)
@@ -23,17 +23,19 @@ class ExpressionManager:
         "n": "",
         "p": "",
         "pi": "",
-            "s": "s",
+        "s": "s",
         "t": "",
         "u": "",
     }
 
-    def __init__(self, expressions: list[Expression], function_definitions: list[str] | None = None):
+    def __init__(self, expressions: list[Expression], function_definitions: list[str] | None = None, step_slices: tuple[slice, ...] | None = None):
         # create expression context; keys are lowercased so that evaluate() lookups always match
         self._context: dict[str, Expression] = {expression.name.lower(): expression for expression in expressions}
         # initialize the qspice language parser and evaluator for expression data
         self._parser = QspiceParser()
         self._evaluator = QspiceEvaluator()
+        # store optional step slice metadata for @N selector evaluation
+        self._step_slices = step_slices
         # parse user-defined .func definitions; keys are lowercased for case-insensitive lookup
         self._functions: dict[str, FunctionDefinitionNode] = {}
         for func_text in (function_definitions or []):
@@ -59,8 +61,10 @@ class ExpressionManager:
                 ast = self._parser.parse_expression(expression)
                 # build qspice variable context from cached expressions
                 data_context = {context_key: context_expression.data for context_key, context_expression in self._context.items()}
-                # evaluate qspice AST to get computed numeric data
-                evaluated_data = self._evaluator.evaluate(ast, data_context, self._functions)
+                # evaluate qspice AST to get computed numeric data; pass step slice metadata for @N support
+                evaluated_data = self._evaluator.evaluate(ast, data_context, self._functions, step_slices=self._step_slices)
+                # re-materialize step-selector results to full stepped layout when necessary
+                evaluated_data = self._rematerialize(evaluated_data, ast)
                 # build unit lookup context from cached expressions
                 unit_context = {context_key: context_expression.unit for context_key, context_expression in self._context.items()}
                 # infer propagated unit from the qspice AST
@@ -76,6 +80,62 @@ class ExpressionManager:
                 logger.warning("Failed to evaluate expression %r: %s", expression, e)
         # exit
         return result
+
+    def _rematerialize(self, data: np.ndarray, ast: ExpressionNode) -> np.ndarray:
+        """Re-materialize a step-selector result to full stepped layout.
+
+        When an expression contains @N selectors it may produce a step-length
+        vector instead of a full total-points array.  This method detects that
+        case and tiles the result across all step blocks so that the output
+        length matches the total point count expected by charting and FFT code.
+        """
+        # nothing to do when there are no step slices or when data is scalar
+        if self._step_slices is None or data.ndim == 0:
+            return data
+        # compute the total number of points
+        total_points = sum(s.stop - s.start for s in self._step_slices)
+        # return data as-is when it already has the expected full length
+        if len(data) == total_points:
+            return data
+        # check whether the expression tree contains any step selector nodes (including inside function bodies)
+        if not self._has_step_selector(ast, self._functions):
+            return data
+        # determine the step length from the first slice
+        step_length = self._step_slices[0].stop - self._step_slices[0].start
+        # reject data that does not match any recognizable step length
+        if len(data) != step_length:
+            return data
+        # tile the single-step result across all steps to produce the full-length array
+        return np.tile(data, len(self._step_slices))
+
+    @staticmethod
+    def _has_step_selector(node: ExpressionNode, functions: dict[str, FunctionDefinitionNode] | None = None, _visited: frozenset[str] | None = None) -> bool:
+        """Return True when the AST contains at least one StepSelectorNode (including inside called function bodies)."""
+        # track visited functions to avoid infinite recursion
+        visited: frozenset[str] = _visited if _visited is not None else frozenset()
+        # direct match
+        if isinstance(node, StepSelectorNode):
+            return True
+        # recurse into unary operands
+        if isinstance(node, UnaryOperationNode):
+            return ExpressionManager._has_step_selector(node.operand, functions, visited)
+        # recurse into binary operands
+        if isinstance(node, BinaryOperationNode):
+            return (ExpressionManager._has_step_selector(node.left, functions, visited) or ExpressionManager._has_step_selector(node.right, functions, visited))
+        # recurse into ternary branches
+        if isinstance(node, TernaryOperationNode):
+            return (ExpressionManager._has_step_selector(node.condition, functions, visited) or ExpressionManager._has_step_selector(node.if_true, functions, visited) or ExpressionManager._has_step_selector(node.if_false, functions, visited))
+        # recurse into function call arguments and also into the body of known user functions
+        if isinstance(node, FunctionCallNode):
+            if any(ExpressionManager._has_step_selector(arg, functions, visited) for arg in node.args):
+                return True
+            if functions is not None:
+                func_key = node.name.casefold()
+                definition = functions.get(func_key)
+                if definition is not None and func_key not in visited:
+                    return ExpressionManager._has_step_selector(definition.body, functions, visited | {func_key})
+        # base cases: literals and identifiers have no selectors
+        return False
 
     def _infer_unit(self, node: ExpressionNode, unit_context: dict[str, str]) -> str:
         # numeric literals are dimensionless
@@ -117,6 +177,9 @@ class ExpressionManager:
             true_unit = self._infer_unit(node.if_true, unit_context)
             false_unit = self._infer_unit(node.if_false, unit_context)
             return true_unit if true_unit == false_unit else ""
+        # step selector does not change the unit of its base expression
+        if isinstance(node, StepSelectorNode):
+            return self._infer_unit(node.base, unit_context)
         # default to dimensionless for unsupported nodes
         return ""
 
@@ -139,6 +202,9 @@ class ExpressionManager:
         # format ternary expressions with explicit grouping
         if isinstance(node, TernaryOperationNode):
             return "(" + self._format_expression(node.condition) + "?" + self._format_expression(node.if_true) + ":" + self._format_expression(node.if_false) + ")"
+        # format step selectors as base@N
+        if isinstance(node, StepSelectorNode):
+            return self._format_expression(node.base) + "@" + str(node.step_index)
         # fallback for unknown nodes
         return ""
 
