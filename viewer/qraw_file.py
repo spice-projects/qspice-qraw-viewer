@@ -181,10 +181,12 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
                 if len(set(step_lengths)) > 1:
                     # log information
                     logger.warning("Invalid stepped abscissa: inconsistent inferred step lengths")
-                    # use a single step covering the entire abscissa range as a fallback
+                    # fallback to a single step covering the entire abscissa range with no parameter values, since the mixed directions violate the expected shape of stepped analyses and would cause confusion in the UI
                     return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
                 # per-step abscissa ranges
                 abscissa_value_ranges = [(float(abscissa_data[step_slice.start]), float(abscissa_data[step_slice.stop - 1])) for step_slice in abscissa_indices]
+                # log information
+                logger.debug("Inferred %d steps from abscissa resets at indices: %s", len(abscissa_indices), [slice.start for slice in abscissa_indices])
                 # return inferred step information
                 return StepInformation(keys=[], values=[], abscissa_indices=abscissa_indices, abscissa_value_ranges=abscissa_value_ranges)
         # no resets detected — treat as unstepped
@@ -207,10 +209,14 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
     abscissa_indices = [slice(s, e) for s, e in zip(starts_list, ends_list)]
     # validate all parameter-derived steps share one monotonic direction
     if not _steps_have_consistent_abscissa_direction(abscissa.data, abscissa_indices):
+        # log information
         logger.warning("Invalid stepped abscissa: mixed ascending/descending step directions")
+        # fallback to a single step covering the entire abscissa range with no parameter values, since the mixed directions violate the expected shape of stepped analyses and would cause confusion in the UI
         return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
     # per-step abscissa value ranges in display space
     abscissa_value_ranges = [(float(abscissa.data[step_slice.start]), float(abscissa.data[step_slice.stop - 1])) for step_slice in abscissa_indices]
+    # log information
+    logger.debug("Detected %d steps from parameter changes at indices: %s", len(abscissa_indices), [slice.start for slice in abscissa_indices])
     # create step information object
     return StepInformation(keys=[expression.name for expression in parameters], values=values, abscissa_indices=abscissa_indices, abscissa_value_ranges=abscissa_value_ranges)
 
