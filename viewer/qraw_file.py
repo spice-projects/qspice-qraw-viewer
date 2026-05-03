@@ -128,8 +128,10 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
         # no parameter variables — try to detect steps from abscissa resets (e.g. NoiseFigure-style: repeated sweeps)
         if num_points > 1:
             abscissa_data = abscissa.data
-            # a new step starts wherever the abscissa value drops (ascending sweep restarts)
-            boundaries = np.flatnonzero(abscissa_data[1:] < abscissa_data[:-1]) + 1
+            # determine sweep direction from first and last point (all steps share the same direction)
+            ascending = abscissa_data[0] <= abscissa_data[-1]
+            # a new step starts wherever the abscissa resets against the sweep direction
+            boundaries = np.flatnonzero(abscissa_data[1:] < abscissa_data[:-1] if ascending else abscissa_data[1:] > abscissa_data[:-1]) + 1
             if len(boundaries) > 0:
                 starts_list = [0] + boundaries.astype(int).tolist()
                 ends_list = boundaries.astype(int).tolist() + [num_points]

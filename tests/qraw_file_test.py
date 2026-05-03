@@ -598,7 +598,24 @@ class TestProcessSteps(TestCase):
         self.assertEqual(result.abscissa_indices[1], slice(3, 6))
         self.assertEqual(result.abscissa_indices[2], slice(6, 9))
 
+    def test_stepped_no_parameters_descending_abscissa_reset_detects_two_steps(self):
+        # arrange — descending sweep: abscissa[0] > abscissa[-1]; reset is detected as a rise between steps
+        stepped = True
+        abscissa_data = np.array([30.0, 20.0, 10.0, 30.0, 20.0, 10.0])
+        expr_abscissa = Expression("Frequency", abscissa_data, "Hz", variable_type="frequency")
+        expr_voltage = Expression("V(out)", np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), "V", variable_type="voltage")
+        expressions = [expr_abscissa, expr_voltage]
+        num_points = 6
+        # act
+        result = _process_steps(stepped, expressions, expr_abscissa, num_points)
+        # assert — two equal-length steps detected from abscissa reset (value rises against descending direction)
+        self.assertEqual(result.length, 2)
+        self.assertEqual(result.abscissa_indices[0], slice(0, 3))
+        self.assertEqual(result.abscissa_indices[1], slice(3, 6))
+        self.assertEqual(result.keys, [])
+        self.assertEqual(result.values, [])
 
+    def test_stepped_single_parameter_two_steps(self):
         # arrange
         stepped = True
         param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
