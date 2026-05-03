@@ -117,6 +117,36 @@ class StepInformation:
         return self._abscissa_value_ranges[step_index][1]
 
 
+def _steps_have_consistent_abscissa_direction(abscissa_data: np.ndarray, abscissa_indices: list[slice]) -> bool:
+    # infer global direction from first non-flat segment across all data
+    global_direction = 0
+    for step_slice in abscissa_indices:
+        # step abscissa values
+        step_data = abscissa_data[step_slice]
+        # per-step deltas
+        step_delta = np.diff(step_data)
+        # ignore flat deltas
+        non_zero_delta = step_delta[step_delta != 0]
+        # skip flat-only slices
+        if len(non_zero_delta) == 0:
+            continue
+        # infer step direction
+        step_direction = 1 if non_zero_delta[0] > 0 else -1
+        # set global direction if not set
+        if global_direction == 0:
+            global_direction = step_direction
+        # reject mixed step directions
+        if step_direction != global_direction:
+            return False
+        # reject non-monotonic shape within a step
+        if step_direction > 0 and np.any(non_zero_delta < 0):
+            return False
+        if step_direction < 0 and np.any(non_zero_delta > 0):
+            return False
+    # all non-flat steps are consistent
+    return True
+
+
 def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expression, num_points: int) -> StepInformation:
     # check this is a stepped analysis
     if not stepped:
@@ -125,7 +155,41 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
     # parameter expressions
     parameters = [expr for expr in expressions if expr.variable_type == "parameter"]
     if len(parameters) == 0:
-        # treat as unstepped
+        # no parameter variables — try to detect steps from abscissa resets (e.g. NoiseFigure-style: repeated sweeps)
+        if num_points > 1:
+            # abscissa values
+            abscissa_data = abscissa.data
+            # infer whether the sweep is ascending or descending from global endpoints
+            sweep_ascending = bool(abscissa_data[0] <= abscissa_data[-1])
+            # consecutive deltas
+            abscissa_delta = np.diff(abscissa_data)
+            # a new step starts when the direction reverses across the step boundary
+            if sweep_ascending:
+                boundaries = np.flatnonzero(abscissa_delta < 0) + 1
+            else:
+                boundaries = np.flatnonzero(abscissa_delta > 0) + 1
+            # check boundaries were found
+            if len(boundaries) > 0:
+                # step start indices
+                starts_list = [0] + boundaries.astype(int).tolist()
+                # step end indices
+                ends_list = boundaries.astype(int).tolist() + [num_points]
+                # step slices
+                abscissa_indices = [slice(s, e) for s, e in zip(starts_list, ends_list)]
+                # inferred no-parameter sweeps must have uniform lengths
+                step_lengths = [step_slice.stop - step_slice.start for step_slice in abscissa_indices]
+                if len(set(step_lengths)) > 1:
+                    # log information
+                    logger.warning("Invalid stepped abscissa: inconsistent inferred step lengths")
+                    # fallback to a single step covering the entire abscissa range with no parameter values, since the mixed directions violate the expected shape of stepped analyses and would cause confusion in the UI
+                    return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
+                # per-step abscissa ranges
+                abscissa_value_ranges = [(float(abscissa_data[step_slice.start]), float(abscissa_data[step_slice.stop - 1])) for step_slice in abscissa_indices]
+                # log information
+                logger.debug("Inferred %d steps from abscissa resets at indices: %s", len(abscissa_indices), [slice.start for slice in abscissa_indices])
+                # return inferred step information
+                return StepInformation(keys=[], values=[], abscissa_indices=abscissa_indices, abscissa_value_ranges=abscissa_value_ranges)
+        # no resets detected — treat as unstepped
         return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
     # stack all parameter values into a matrix (num_points, num_parameters)
     stacked = np.column_stack([expression.data for expression in parameters]) if len(parameters) > 1 else parameters[0].data.reshape(-1, 1)
@@ -143,8 +207,16 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
     values = [tuple(stacked[int(s)].tolist()) for s in starts_list]
     # calculate slices for each one of the steps
     abscissa_indices = [slice(s, e) for s, e in zip(starts_list, ends_list)]
+    # validate all parameter-derived steps share one monotonic direction
+    if not _steps_have_consistent_abscissa_direction(abscissa.data, abscissa_indices):
+        # log information
+        logger.warning("Invalid stepped abscissa: mixed ascending/descending step directions")
+        # fallback to a single step covering the entire abscissa range with no parameter values, since the mixed directions violate the expected shape of stepped analyses and would cause confusion in the UI
+        return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
     # per-step abscissa value ranges in display space
     abscissa_value_ranges = [(float(abscissa.data[step_slice.start]), float(abscissa.data[step_slice.stop - 1])) for step_slice in abscissa_indices]
+    # log information
+    logger.debug("Detected %d steps from parameter changes at indices: %s", len(abscissa_indices), [slice.start for slice in abscissa_indices])
     # create step information object
     return StepInformation(keys=[expression.name for expression in parameters], values=values, abscissa_indices=abscissa_indices, abscissa_value_ranges=abscissa_value_ranges)
 
@@ -319,6 +391,8 @@ class QRawFile:
             pos = 0
             # aliases
             aliasses: dict[str, str] = {}
+            # user-defined function definitions (.func directives)
+            func_definitions: list[str] = []
             # process file bytes
             while pos < len(data):
                 # find \n
@@ -376,6 +450,10 @@ class QRawFile:
                     if len(parts) == 3:
                         # append to aliasses
                         aliasses[parts[1]] = parts[2]
+                # user-defined function directive
+                if line.startswith(".func"):
+                    # store the raw directive text for the expression manager to parse
+                    func_definitions.append(line)
             # validate that we found the binary section
             if binary_offset < 0:
                 # log error
@@ -409,8 +487,14 @@ class QRawFile:
                 matrix = flat.reshape(num_points, num_variables)
                 # extract variables
                 variables = [Expression(name, matrix[:, idx], var_type.value.unit, source=None, variable_type=var_type.value.name) for idx, name, var_type in variable_definitions]
-            # create expression manager
-            expression_manager = ExpressionManager(variables)
+            # process scale (x axis) before step detection so abscissa values are correct
+            abscissa = _process_scale(variables[0], abscissa_scale)
+            # process steps using the scaled abscissa values — slices are needed by the expression manager for @N
+            step_information = _process_steps(stepped, variables, abscissa, num_points)
+            # build step slices tuple for @N selector support in expressions and .func definitions
+            step_slices: tuple[slice, ...] | None = tuple(step_information.abscissa_indices) if step_information.length > 1 else None
+            # create expression manager, passing any user-defined .func definitions and step slice metadata
+            expression_manager = ExpressionManager(variables, func_definitions if func_definitions else None, step_slices)
             # process aliasses
             if len(aliasses) > 0:
                 # loop aliasses
@@ -421,10 +505,6 @@ class QRawFile:
                     except Exception as ex:
                         # log error but continue processing other aliasses
                         logger.error("Failed to evaluate expression '%s': %s", alias_name, ex)
-            # process scale (x axis)
-            abscissa = _process_scale(variables[0], abscissa_scale)
-            # process steps in stepped files using the scaled abscissa values
-            step_information = _process_steps(stepped, variables, abscissa, num_points)
             # create QRawFile instance with parsed header, variables, and binary data; pass the mmap so it stays alive for the lifetime of the QRawFile — Variable arrays are views into it
             return QRawFile(filename=path, title=header.get("Title", ""), date=header.get("Date", ""), plotname=header.get("Plotname", ""), complex=complex, step_information=step_information, abscissa=abscissa, abscissa_scale=abscissa_scale, command=header.get("Command", ""), plot_suggestion=header.get("Plot Suggestion(s)", ""), expression_manager=expression_manager, _mmap=data)
         finally:

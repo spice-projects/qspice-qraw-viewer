@@ -252,3 +252,147 @@ class TestExpressionManager(TestCase):
         manager.evaluate("2 * V(R1)")
         # assert
         self.assertEqual(len(manager.expressions), expected_len)
+
+    # ------------------------------------------------------------------ #
+    # User-defined functions (.func directives)                          #
+    # ------------------------------------------------------------------ #
+
+    def test_func_definition_is_callable_in_expressions(self):
+        # arrange
+        expr = Expression("V(R1)", np.array([1.0, 2.0, 3.0]), "V")
+        manager = ExpressionManager([expr], [".func DOUBLE(x) {x * 2}"])
+        # act
+        result = manager.evaluate("DOUBLE(V(R1))")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, [2.0, 4.0, 6.0])
+
+    def test_func_definition_is_case_insensitive_at_call_site(self):
+        # arrange
+        expr = Expression("V(R1)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr], [".func GAIN(x) {x * 10}"])
+        # act
+        result = manager.evaluate("gain(V(R1))")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, [10.0, 20.0])
+
+    def test_func_definition_unit_propagation_preserves_voltage(self):
+        # arrange — DOUBLE(x) {x * 2}: scaling a voltage must return voltage
+        expr = Expression("V(R1)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr], [".func DOUBLE(x) {x * 2}"])
+        # act
+        result = manager.evaluate("DOUBLE(V(R1))")
+        # assert
+        self.assertEqual(result.unit, "V")
+
+    def test_func_definition_unit_propagation_power(self):
+        # arrange — POWER(v, i) {v * i}: V * A should give W
+        expr_v = Expression("V(R1)", np.array([2.0, 4.0]), "V")
+        expr_i = Expression("I(R1)", np.array([1.0, 2.0]), "A")
+        manager = ExpressionManager([expr_v, expr_i], [".func POWER(v, i) {v * i}"])
+        # act
+        result = manager.evaluate("POWER(V(R1), I(R1))")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, [2.0, 8.0])
+        self.assertEqual(result.unit, "W")
+
+    def test_func_definition_calling_another_func(self):
+        # arrange — F2 calls F1; both definitions passed together
+        expr = Expression("V(R1)", np.array([5.0, 10.0]), "V")
+        manager = ExpressionManager([expr], [".func F1(x) {x + 1}", ".func F2(y) {F1(y) * 2}"])
+        # act
+        result = manager.evaluate("F2(V(R1))")
+        # assert — F2(5)=(5+1)*2=12, F2(10)=(10+1)*2=22
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, [12.0, 22.0])
+
+    def test_func_invalid_definition_is_skipped_gracefully(self):
+        # arrange — a malformed .func must not prevent the manager from constructing
+        expr = Expression("V(R1)", np.array([1.0]), "V")
+        manager = ExpressionManager([expr], [".func BAD( {1}"])
+        # act — valid expressions must still work
+        result = manager.evaluate("V(R1)")
+        # assert
+        self.assertIsNotNone(result)
+
+    def test_func_unknown_call_after_func_registration_returns_none(self):
+        # arrange — only DOUBLE is registered; calling TRIPLE must fail gracefully
+        expr = Expression("V(R1)", np.array([1.0]), "V")
+        manager = ExpressionManager([expr], [".func DOUBLE(x) {x * 2}"])
+        # act
+        result = manager.evaluate("TRIPLE(V(R1))")
+        # assert
+        self.assertIsNone(result)
+
+    # ------------------------------------------------------------------ #
+    # Step selectors (@N) via ExpressionManager                          #
+    # ------------------------------------------------------------------ #
+
+    def test_step_selector_expression_picks_correct_step(self):
+        # arrange — 4-point waveform, two steps of 2 points; @1 should return step 1 rematerialized
+        expr = Expression("V(out)", np.array([1.0, 2.0, 10.0, 20.0]), "V")
+        step_slices = (slice(0, 2), slice(2, 4))
+        manager = ExpressionManager([expr], step_slices=step_slices)
+        # act
+        result = manager.evaluate("V(out)@1")
+        # assert — step 1 is [1, 2]; rematerialized across 2 steps → [1, 2, 1, 2]
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.data), 4)
+        np.testing.assert_array_almost_equal(result.data, np.array([1.0, 2.0, 1.0, 2.0]))
+
+    def test_step_selector_unit_is_preserved(self):
+        # arrange — voltage variable, @N must not change the unit
+        expr = Expression("V(out)", np.array([1.0, 2.0, 3.0, 4.0]), "V")
+        step_slices = (slice(0, 2), slice(2, 4))
+        manager = ExpressionManager([expr], step_slices=step_slices)
+        # act
+        result = manager.evaluate("V(out)@1")
+        # assert
+        self.assertEqual(result.unit, "V")
+
+    def test_step_selector_ratio_rematerialized_to_full_length(self):
+        # arrange — NFDB-style ratio: step1/step2 per frequency, rematerialized to 4 points
+        expr = Expression("V(inoise)", np.array([10.0, 20.0, 2.0, 4.0]), "V")
+        step_slices = (slice(0, 2), slice(2, 4))
+        manager = ExpressionManager([expr], step_slices=step_slices)
+        # act
+        result = manager.evaluate("V(inoise)@1 / V(inoise)@2")
+        # assert — ratio is [10/2, 20/4] = [5, 5]; tiled to 4 points → [5, 5, 5, 5]
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.data), 4)
+        np.testing.assert_array_almost_equal(result.data, np.array([5.0, 5.0, 5.0, 5.0]))
+
+    def test_step_selector_func_nfdb_evaluates_to_full_length(self):
+        # arrange — real-world NoiseFigure.qraw: .func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}
+        expr = Expression("V(inoise)", np.array([10.0, 2.0]), "V")
+        step_slices = (slice(0, 1), slice(1, 2))
+        manager = ExpressionManager([expr], [".func NFDB(){20*LOG10(V(INOISE)@1/V(INOISE)@2)}"], step_slices)
+        # act
+        result = manager.evaluate("NFDB()")
+        # assert — 20*log10(10/2) tiled to 2 points
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.data), 2)
+        np.testing.assert_array_almost_equal(result.data, np.full(2, 20.0 * np.log10(5.0)))
+
+    def test_step_selector_without_step_slices_returns_none(self):
+        # arrange — no step metadata; @N selector cannot be evaluated
+        expr = Expression("V(out)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr])
+        # act
+        result = manager.evaluate("V(out)@1")
+        # assert — must fail gracefully and return None
+        self.assertIsNone(result)
+
+    def test_step_selector_non_stepped_expression_unchanged(self):
+        # arrange — plain expression without @N must be unaffected by step_slices presence
+        expr = Expression("V(R1)", np.array([1.0, 2.0, 3.0, 4.0]), "V")
+        step_slices = (slice(0, 2), slice(2, 4))
+        manager = ExpressionManager([expr], step_slices=step_slices)
+        # act
+        result = manager.evaluate("2 * V(R1)")
+        # assert — full-length array unchanged
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.data), 4)
+        np.testing.assert_array_almost_equal(result.data, np.array([2.0, 4.0, 6.0, 8.0]))
