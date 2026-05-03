@@ -642,8 +642,6 @@ class TestProcessSteps(TestCase):
         # assert — invalid mixed directions fallback to single-step
         self.assertEqual(result.length, 1)
         self.assertEqual(result.abscissa_indices[0], slice(0, 6))
-
-
         # arrange
         stepped = True
         param_data = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
