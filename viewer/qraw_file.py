@@ -117,6 +117,36 @@ class StepInformation:
         return self._abscissa_value_ranges[step_index][1]
 
 
+def _steps_have_consistent_abscissa_direction(abscissa_data: np.ndarray, abscissa_indices: list[slice]) -> bool:
+    # infer global direction from first non-flat segment across all data
+    global_direction = 0
+    for step_slice in abscissa_indices:
+        # step abscissa values
+        step_data = abscissa_data[step_slice]
+        # per-step deltas
+        step_delta = np.diff(step_data)
+        # ignore flat deltas
+        non_zero_delta = step_delta[step_delta != 0]
+        # skip flat-only slices
+        if len(non_zero_delta) == 0:
+            continue
+        # infer step direction
+        step_direction = 1 if non_zero_delta[0] > 0 else -1
+        # set global direction if not set
+        if global_direction == 0:
+            global_direction = step_direction
+        # reject mixed step directions
+        if step_direction != global_direction:
+            return False
+        # reject non-monotonic shape within a step
+        if step_direction > 0 and np.any(non_zero_delta < 0):
+            return False
+        if step_direction < 0 and np.any(non_zero_delta > 0):
+            return False
+    # all non-flat steps are consistent
+    return True
+
+
 def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expression, num_points: int) -> StepInformation:
     # check this is a stepped analysis
     if not stepped:
@@ -127,14 +157,39 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
     if len(parameters) == 0:
         # no parameter variables — try to detect steps from abscissa resets (e.g. NoiseFigure-style: repeated sweeps)
         if num_points > 1:
+            # abscissa values
             abscissa_data = abscissa.data
-            # a new step starts wherever the abscissa value drops (ascending sweep restarts)
-            boundaries = np.flatnonzero(abscissa_data[1:] < abscissa_data[:-1]) + 1
+            # consecutive deltas
+            abscissa_delta = np.diff(abscissa_data)
+            # non-zero deltas to infer sweep direction
+            non_zero_delta = abscissa_delta[abscissa_delta != 0]
+            # infer whether each step sweep is ascending or descending
+            sweep_ascending = bool(non_zero_delta[0] > 0) if len(non_zero_delta) > 0 else True
+            # a new step starts when the direction reverses across the step boundary
+            if sweep_ascending:
+                boundaries = np.flatnonzero(abscissa_delta < 0) + 1
+            else:
+                boundaries = np.flatnonzero(abscissa_delta > 0) + 1
+            # check boundaries were found
             if len(boundaries) > 0:
+                # step start indices
                 starts_list = [0] + boundaries.astype(int).tolist()
+                # step end indices
                 ends_list = boundaries.astype(int).tolist() + [num_points]
+                # step slices
                 abscissa_indices = [slice(s, e) for s, e in zip(starts_list, ends_list)]
+                # inferred no-parameter sweeps must have uniform lengths
+                step_lengths = [step_slice.stop - step_slice.start for step_slice in abscissa_indices]
+                if len(set(step_lengths)) > 1:
+                    logger.warning("Invalid stepped abscissa: inconsistent inferred step lengths")
+                    return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
+                # validate all detected steps have the same monotonic direction
+                if not _steps_have_consistent_abscissa_direction(abscissa_data, abscissa_indices):
+                    logger.warning("Invalid stepped abscissa: mixed ascending/descending step directions")
+                    return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
+                # per-step abscissa ranges
                 abscissa_value_ranges = [(float(abscissa_data[step_slice.start]), float(abscissa_data[step_slice.stop - 1])) for step_slice in abscissa_indices]
+                # return inferred step information
                 return StepInformation(keys=[], values=[], abscissa_indices=abscissa_indices, abscissa_value_ranges=abscissa_value_ranges)
         # no resets detected — treat as unstepped
         return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
@@ -154,6 +209,10 @@ def _process_steps(stepped: bool, expressions: list[Expression], abscissa: Expre
     values = [tuple(stacked[int(s)].tolist()) for s in starts_list]
     # calculate slices for each one of the steps
     abscissa_indices = [slice(s, e) for s, e in zip(starts_list, ends_list)]
+    # validate all parameter-derived steps share one monotonic direction
+    if not _steps_have_consistent_abscissa_direction(abscissa.data, abscissa_indices):
+        logger.warning("Invalid stepped abscissa: mixed ascending/descending step directions")
+        return StepInformation(keys=[], values=[], abscissa_indices=[slice(0, num_points)], abscissa_value_ranges=[(float(abscissa.data[0]), float(abscissa.data[-1]))] if num_points > 0 else [(0.0, 0.0)])
     # per-step abscissa value ranges in display space
     abscissa_value_ranges = [(float(abscissa.data[step_slice.start]), float(abscissa.data[step_slice.stop - 1])) for step_slice in abscissa_indices]
     # create step information object
