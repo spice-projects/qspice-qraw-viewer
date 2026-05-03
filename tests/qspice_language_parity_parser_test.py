@@ -5,7 +5,7 @@ from viewer.qspice_language.parser import QspiceParser
 
 
 class TestQspiceParserParity(TestCase):
-    """Port all test cases from expression_parser_test.py."""
+    """Port all test cases from the legacy parser test suite."""
 
     # ------------------------------------------------------------------ #
     # Literals                                                             #

@@ -4,8 +4,8 @@ import numpy as np
 class Expression:
     """A named, evaluated expression with a data array and a propagated unit.
 
-    Instances are produced by :class:`~viewer.expression_evaluator.ExpressionEvaluator`
-    and represent any computed trace — whether derived from a .alias directive,
+    Instances are produced by :class:`~viewer.expression_manager.ExpressionManager`
+    and represent any computed trace - whether derived from a .alias directive,
     typed interactively by the user, or loaded directly from the QRAW file.
     """
 

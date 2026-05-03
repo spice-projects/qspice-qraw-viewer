@@ -7,7 +7,7 @@ from viewer.qspice_language.parser import QspiceParser
 
 
 class TestQspiceEvaluatorParity(TestCase):
-    """Port key test cases from expression_evaluator_test.py."""
+    """Port key test cases from the legacy evaluator test suite."""
 
     # ------------------------------------------------------------------ #
     # Literals and variables                                              #
