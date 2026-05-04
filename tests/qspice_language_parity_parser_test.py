@@ -74,8 +74,8 @@ class TestQspiceParserParity(TestCase):
         self.assertEqual(len(node.args), 2)
         self.assertIsInstance(node.args[0], IdentifierNode)
         self.assertEqual(node.args[0].name, "R1")
-        self.assertIsInstance(node.args[1], NumberNode)
-        self.assertEqual(node.args[1].text, "0")
+        self.assertIsInstance(node.args[1], IdentifierNode)
+        self.assertEqual(node.args[1].name, "0")
 
     def test_parse_current_probe(self):
         # arrange
