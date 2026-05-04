@@ -251,8 +251,12 @@ class QspiceParser:
                 return self._parse_postfix_reference(IdentifierNode(identifier))
             # consume the argument list opener
             self._consume(TokenKind.LPAREN)
-            # parse the argument list
-            args = self._parse_argument_list()
+            # probe functions receive raw node-name arguments that may contain
+            # hyphens, slashes, and bullet-separated digit-prefixed identifiers
+            if identifier.casefold() in ("v", "i", "id"):
+                args = self._parse_probe_argument_list()
+            else:
+                args = self._parse_argument_list()
             # consume the argument list closer
             self._consume(TokenKind.RPAREN)
             # parse an optional selector suffix such as V(INOISE)@1 as a direct identifier lookup
@@ -301,6 +305,42 @@ class QspiceParser:
                 return args
             # consume the argument separator
             self._consume(TokenKind.COMMA)
+
+    def _parse_probe_argument_list(self) -> list[ExpressionNode]:
+        # collect probe node-name arguments
+        args: list[ExpressionNode] = []
+        # exit early for an empty argument list
+        if self._peek().kind == TokenKind.RPAREN:
+            return args
+        # parse comma-separated probe node names
+        while True:
+            # append the next raw node name
+            args.append(self._parse_probe_node_name())
+            # exit when the argument list ends
+            if self._peek().kind != TokenKind.COMMA:
+                return args
+            # consume the argument separator
+            self._consume(TokenKind.COMMA)
+
+    def _parse_probe_node_name(self) -> ExpressionNode:
+        # token kinds that are valid constituents of a SPICE/KiCad/QSPICE net name:
+        # - IDENTIFIER: alphabetic start (includes bullet-prefixed fragments after Fix 1)
+        # - NUMBER: digit-only prefix segments like "7" in "7•x1•xu302" or ground "0"
+        # - MINUS: hyphens in KiCad auto-generated names like "net-_u304a-g2_"
+        # - SLASH: hierarchy separators in QSPICE paths like "/power_amplifier/vcc1"
+        _NODE_NAME_TOKENS = frozenset({
+            TokenKind.IDENTIFIER, TokenKind.NUMBER,
+            TokenKind.MINUS, TokenKind.SLASH,
+        })
+        # collect raw text fragments that form the node name
+        parts: list[str] = []
+        while self._peek().kind in _NODE_NAME_TOKENS:
+            parts.append(self._consume(self._peek().kind).text)
+        # require at least one fragment to form a valid node name
+        if not parts:
+            raise ValueError(f"Expected probe node name at offset {self._peek().start}")
+        # reconstruct the full net name string and wrap it as an identifier
+        return IdentifierNode("".join(parts))
 
     def _peek(self) -> Token:
         # return the current token

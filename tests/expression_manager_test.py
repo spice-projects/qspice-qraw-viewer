@@ -396,3 +396,140 @@ class TestExpressionManager(TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(len(result.data), 4)
         np.testing.assert_array_almost_equal(result.data, np.array([2.0, 4.0, 6.0, 8.0]))
+
+    # ------------------------------------------------------------------ #
+    # Regression: KiCad-style node names and QSPICE bullet separators   #
+    # (test-2.qraw, Transient Analysis, 179 variables)                   #
+    # ------------------------------------------------------------------ #
+
+    def test_evaluate_node_name_digit_prefix_bullet_separator_single_probe(self):
+        # arrange — QSPICE node names like "7•x1•x1•xu302" start with a digit; the bullet
+        # character separates hierarchical levels and must be treated as part of the identifier;
+        # using an arithmetic wrapper forces the parser to handle the node name
+        expr = Expression("V(7•x1•x1•xu302)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr])
+        # act — multiply by 1 to force full expression parsing rather than direct cache lookup
+        result = manager.evaluate("1 * V(7•x1•x1•xu302)")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([1.0, 2.0]))
+
+    def test_evaluate_node_name_digit_prefix_bullet_separator_with_ground(self):
+        # arrange — alias from log: (1e-09mho*V(7•x1•x1•xu302,0)); second arg is ground
+        expr = Expression("V(7•x1•x1•xu302)", np.array([3.0, 6.0]), "V")
+        manager = ExpressionManager([expr])
+        # act — full conductance alias expression with bullet-separated digit-prefixed node
+        result = manager.evaluate("(1e-09mho*V(7•x1•x1•xu302,0))")
+        # assert — 1e-9 * V(7•x1•x1•xu302)
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([3e-9, 6e-9]))
+
+    def test_evaluate_node_name_pure_digit_prefix_with_bullet(self):
+        # arrange — alias from log: (1e-09mho*V(7•x1•x2•xu302,0)); "7" is the node prefix
+        expr = Expression("V(7•x1•x2•xu302)", np.array([2.0, 4.0]), "V")
+        manager = ExpressionManager([expr])
+        # act
+        result = manager.evaluate("V(7•x1•x2•xu302,0)")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([2.0, 4.0]))
+
+    def test_evaluate_node_name_digit_prefix_bullet_in_second_arg(self):
+        # arrange — alias from log: (2.5mho*V(16a•x1•xt301,24•xt301)); second arg "24•xt301"
+        # starts with the digit 24 followed by bullet, which must be treated as one identifier
+        expr_a = Expression("V(16a•x1•xt301)", np.array([5.0, 10.0]), "V")
+        expr_b = Expression("V(24•xt301)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr_a, expr_b])
+        # act — differential probe where both node names contain bullet separators
+        result = manager.evaluate("(2.5mho*V(16a•x1•xt301,24•xt301))")
+        # assert — 2.5 * (V(16a•x1•xt301) - V(24•xt301)) = 2.5 * [4, 8]
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([10.0, 20.0]))
+
+    def test_evaluate_kicad_net_name_with_hyphen_underscore_as_probe_arg(self):
+        # arrange — KiCad-generated net names like "net-_u304a-g2_" contain hyphens; the parser
+        # must treat the whole token as a single identifier, not as arithmetic subtraction
+        expr_ot = Expression("V(ot)", np.array([3.0, 6.0]), "V")
+        expr_net = Expression("V(net-_u304a-g2_)", np.array([1.0, 2.0]), "V")
+        manager = ExpressionManager([expr_ot, expr_net])
+        # act — alias from log: (0.01mho*V(ot,net-_u304a-g2_))
+        result = manager.evaluate("(0.01mho*V(ot,net-_u304a-g2_))")
+        # assert — 0.01 * (V(ot) - V(net-_u304a-g2_)) = 0.01 * [2, 4]
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([0.02, 0.04]))
+
+    def test_evaluate_kicad_net_name_hyphen_underscore_single_probe(self):
+        # arrange — KiCad net "net-_u301c-f2_" used as sole V() argument (no differential);
+        # using an arithmetic wrapper forces the parser to handle the net name token
+        expr = Expression("V(net-_u301c-f2_)", np.array([2.0, 4.0]), "V")
+        manager = ExpressionManager([expr])
+        # act — multiply by 1 to force full expression parsing rather than direct cache lookup
+        result = manager.evaluate("1 * V(net-_u301c-f2_)")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([2.0, 4.0]))
+
+    def test_evaluate_kicad_net_name_both_args_hyphen_pattern(self):
+        # arrange — alias from log: (0.00333333333333333mho*V(net-_u302a-g_,net-_u301a-a_))
+        expr_a = Expression("V(net-_u302a-g_)", np.array([5.0, 10.0]), "V")
+        expr_b = Expression("V(net-_u301a-a_)", np.array([2.0, 3.0]), "V")
+        manager = ExpressionManager([expr_a, expr_b])
+        # act — both probe arguments are KiCad-style net names
+        result = manager.evaluate("(0.00333333333333333mho*V(net-_u302a-g_,net-_u301a-a_))")
+        # assert — 1/300 * (V(net-_u302a-g_) - V(net-_u301a-a_)) = 1/300 * [3, 7]
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([0.01, 7.0 / 300.0]))
+
+    def test_evaluate_hierarchical_path_leading_slash_single_probe(self):
+        # arrange — QSPICE hierarchical net names start with "/" like "/power_amplifier/vcc1";
+        # the slash must be treated as part of the identifier, not as a division operator;
+        # using an arithmetic wrapper forces the parser to handle the leading slash
+        expr = Expression("V(/power_amplifier/vcc1)", np.array([12.0, 12.0]), "V")
+        manager = ExpressionManager([expr])
+        # act — multiply by 1 to force full expression parsing rather than direct cache lookup
+        result = manager.evaluate("1 * V(/power_amplifier/vcc1)")
+        # assert
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([12.0, 12.0]))
+
+    def test_evaluate_hierarchical_path_as_second_probe_argument(self):
+        # arrange — alias from log: (5e-05mho*V(vcc,/power_amplifier/vcc1))
+        expr_vcc = Expression("V(vcc)", np.array([15.0, 15.0]), "V")
+        expr_hier = Expression("V(/power_amplifier/vcc1)", np.array([12.0, 12.0]), "V")
+        manager = ExpressionManager([expr_vcc, expr_hier])
+        # act — second V() argument is a hierarchical path starting with "/"
+        result = manager.evaluate("(5e-05mho*V(vcc,/power_amplifier/vcc1))")
+        # assert — 5e-5 * (V(vcc) - V(/power_amplifier/vcc1)) = 5e-5 * 3
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([1.5e-4, 1.5e-4]))
+
+    def test_evaluate_hierarchical_path_as_first_probe_argument(self):
+        # arrange — alias from log: (1e-09mho*V(/power_amplifier/katode,0))
+        expr = Expression("V(/power_amplifier/katode)", np.array([50.0, 55.0]), "V")
+        manager = ExpressionManager([expr])
+        # act — first argument is a hierarchical path; second is ground
+        result = manager.evaluate("(1e-09mho*V(/power_amplifier/katode,0))")
+        # assert — 1e-9 * V(/power_amplifier/katode)
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([5e-8, 5.5e-8]))
+
+    def test_evaluate_hierarchical_path_both_args(self):
+        # arrange — alias from log: (0.0001mho*V(/power_amplifier/vcc1,/power_amplifier/vcc2))
+        expr_vcc1 = Expression("V(/power_amplifier/vcc1)", np.array([12.0, 12.0]), "V")
+        expr_vcc2 = Expression("V(/power_amplifier/vcc2)", np.array([6.0, 6.0]), "V")
+        manager = ExpressionManager([expr_vcc1, expr_vcc2])
+        # act — both probe arguments are hierarchical paths
+        result = manager.evaluate("(0.0001mho*V(/power_amplifier/vcc1,/power_amplifier/vcc2))")
+        # assert — 0.0001 * (V(vcc1) - V(vcc2)) = 0.0001 * 6
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([6e-4, 6e-4]))
+
+    def test_evaluate_probe_ground_as_first_argument(self):
+        # arrange — alias from log: (1e-09mho*V(0,u1_n08257•xu305)); V(0,node) = -V(node)
+        expr = Expression("V(u1_n08257•xu305)", np.array([0.5, 1.0]), "V")
+        manager = ExpressionManager([expr])
+        # act — first probe argument is ground node "0"; should evaluate as 0 - V(node)
+        result = manager.evaluate("(1e-09mho*V(0,u1_n08257•xu305))")
+        # assert — 1e-9 * (V(0) - V(u1_n08257•xu305)) = 1e-9 * (-V(node)) = [-5e-10, -1e-9]
+        self.assertIsNotNone(result)
+        np.testing.assert_array_almost_equal(result.data, np.array([-5e-10, -1e-9]))

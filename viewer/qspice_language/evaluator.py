@@ -190,12 +190,17 @@ class QspiceEvaluator:
             # extract the two node names
             node_a_name = self._extract_node_name(expression.args[0])
             node_b_name = self._extract_node_name(expression.args[1])
-            # handle ground reference (node 0 or "0")
+            # handle ground as second argument: V(a, 0) = V(a)
             if node_b_name == "0" or node_b_name.lower() == "0":
-                # V(a, 0) = V(a); just return the first node
+                # return the first node directly
                 probe_a_key = ("v(" + node_a_name + ")").casefold()
                 if probe_a_key in context.variables:
                     return context.variables[probe_a_key]
+            # handle ground as first argument: V(0, b) = -V(b)
+            if node_a_name == "0":
+                probe_b_key = ("v(" + node_b_name + ")").casefold()
+                if probe_b_key in context.variables:
+                    return -context.variables[probe_b_key]
             # try to find both single-node probes for differential
             probe_a_key = ("v(" + node_a_name + ")").casefold()
             probe_b_key = ("v(" + node_b_name + ")").casefold()

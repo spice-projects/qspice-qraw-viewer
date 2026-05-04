@@ -5,7 +5,8 @@ from unittest import TestCase
 import numpy as np
 
 from viewer.expression import Expression
-from viewer.qraw_file import (AbscissaScale, PlotSuggestion, QRawFile, VariableType, VariableTypeInformation, _process_scale, _process_steps)
+from viewer.expression_manager import ExpressionManager
+from viewer.qraw_file import (AbscissaScale, PlotSuggestion, QRawFile, StepInformation, VariableType, VariableTypeInformation, _process_scale, _process_steps, _register_noise_spectrum_aliases)
 
 FIXTURES_DIR = Path(__file__).parent / "PyQSPICE"
 
@@ -439,6 +440,54 @@ class TestQRawFile(TestCase):
         # assert — all power variables must have variable_type "power"
         for var in power_vars:
             self.assertEqual(var.variable_type, "power", msg=f"{var.name} should have variable_type 'power'")
+
+
+class TestNoiseSpectrumAliases(TestCase):
+
+    def test_register_noise_spectrum_aliases_adds_missing_base_names(self):
+        # arrange
+        expr_frequency = Expression("Frequency", np.array([3.0, 4.0, 5.0]), "Hz", variable_type="frequency")
+        expr_onoise = Expression("V(onoise_spectrum)", np.array([1.0, 2.0, 3.0]), "V", variable_type="voltage")
+        expr_inoise = Expression("V(inoise_spectrum)", np.array([4.0, 5.0, 6.0]), "V", variable_type="voltage")
+        expression_manager = ExpressionManager([expr_frequency, expr_onoise, expr_inoise])
+        # act
+        _register_noise_spectrum_aliases(expression_manager, "Noise Spectral Density Curves - (V^2 or A^2)/Hz")
+        output_alias = expression_manager.evaluate("V(Onoise)")
+        input_alias = expression_manager.evaluate("V(Inoise)")
+        # assert
+        self.assertIsNotNone(output_alias)
+        self.assertIsNotNone(input_alias)
+        self.assertEqual(output_alias.name, "V(onoise)")
+        self.assertEqual(input_alias.name, "V(inoise)")
+        np.testing.assert_array_equal(output_alias.data, expr_onoise.data)
+        np.testing.assert_array_equal(input_alias.data, expr_inoise.data)
+
+    def test_register_noise_spectrum_aliases_preserves_existing_base_name(self):
+        # arrange
+        expr_base = Expression("V(onoise)", np.array([9.0, 9.0, 9.0]), "V", variable_type="voltage")
+        expr_spectrum = Expression("V(onoise_spectrum)", np.array([1.0, 2.0, 3.0]), "V", variable_type="voltage")
+        expression_manager = ExpressionManager([expr_base, expr_spectrum])
+        # act
+        _register_noise_spectrum_aliases(expression_manager, "Noise Spectral Density Curves - (V^2 or A^2)/Hz")
+        result = expression_manager.evaluate("V(Onoise)")
+        # assert
+        self.assertIs(result, expr_base)
+        np.testing.assert_array_equal(result.data, expr_base.data)
+
+    def test_get_plot_suggestions_resolves_noise_spectrum_base_name(self):
+        # arrange
+        expr_frequency = Expression("Frequency", np.array([3.0, 4.0, 5.0]), "Hz", variable_type="frequency")
+        expr_spectrum = Expression("V(onoise_spectrum)", np.array([1.0, 2.0, 3.0]), "V", variable_type="voltage")
+        expression_manager = ExpressionManager([expr_frequency, expr_spectrum])
+        _register_noise_spectrum_aliases(expression_manager, "Noise Spectral Density Curves - (V^2 or A^2)/Hz")
+        step_information = StepInformation(keys=[], values=[], abscissa_indices=[slice(0, 3)], abscissa_value_ranges=[(3.0, 5.0)])
+        qraw = QRawFile(filename=Path("noise.qraw"), title="", date="", plotname="Noise Spectral Density Curves - (V^2 or A^2)/Hz", complex=False, step_information=step_information, abscissa=expr_frequency, abscissa_scale=AbscissaScale.DECADE, command="", plot_suggestion="«V(Onoise)»", expression_manager=expression_manager)
+        # act
+        suggestions = qraw.get_plot_suggestions()
+        # assert
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0].chart_type, "AC")
+        self.assertEqual([expression.name for expression in suggestions[0].expressions], ["V(onoise)"])
 
 
 class TestQRawFileLoad(TestCase):

@@ -190,7 +190,9 @@ class QspiceLexer:
 
     @staticmethod
     def _is_identifier_start(ch: str) -> bool:
-        return ch.isalpha() or ch == "_"
+        # allow bullet as a start so digit-prefixed QSPICE node tokens like 7•x1•xu302 are split
+        # at the digit boundary and the remaining •-prefixed fragment becomes a valid identifier
+        return ch.isalpha() or ch in "_•"
 
     @staticmethod
     def _is_identifier_part(ch: str) -> bool:
