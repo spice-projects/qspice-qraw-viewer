@@ -13,6 +13,35 @@ from .expression_manager import ExpressionManager
 logger = logging.getLogger(__name__)
 
 
+def _register_noise_spectrum_aliases(expression_manager: ExpressionManager, plotname: str) -> None:
+    # only create synthetic aliases for noise analysis files
+    if "noise" not in plotname.casefold():
+        return
+    # snapshot current expression names so synthetic aliases never override real variables or explicit aliases
+    existing_names = {expression.name.casefold() for expression in expression_manager.expressions}
+    # collect pending aliases first so iterating expressions remains stable while the manager cache grows
+    pending_aliases: list[tuple[str, str]] = []
+    # process existing expressions
+    for expression in expression_manager.expressions:
+        # skip non-spectrum expressions
+        if not expression.name.casefold().endswith("_spectrum)"):
+            continue
+        # derive the synthetic base name from the stored spectrum variable
+        alias_name = expression.name[:-10] + ")"
+        # only fill gaps; do not replace an existing variable or alias
+        if alias_name.casefold() in existing_names:
+            continue
+        # append new expression
+        pending_aliases.append((alias_name, expression.name))
+        existing_names.add(alias_name.casefold())
+    # register synthetic aliases through the expression manager cache
+    for alias_name, alias_expression in pending_aliases:
+        # log information
+        logger.debug("Registering synthetic alias '%s' for noise spectrum expression '%s'", alias_name, alias_expression)
+        # evaluate expression to register it in the manager cache; the actual value of the expression is not used since it's a direct alias, so we can skip the costly evaluation of the aliased expression and just store a reference to it in the cache
+        expression_manager.evaluate(alias_expression, alias_name)
+
+
 class AbscissaScale(Enum):
     LINEAR = "lin"
     DECADE = "dec"
@@ -495,6 +524,8 @@ class QRawFile:
             step_slices: tuple[slice, ...] | None = tuple(step_information.abscissa_indices) if step_information.length > 1 else None
             # create expression manager, passing any user-defined .func definitions and step slice metadata
             expression_manager = ExpressionManager(variables, func_definitions if func_definitions else None, step_slices)
+            # register noise-specific synthetic aliases such as V(Onoise) -> V(onoise_spectrum) before user aliases are evaluated
+            _register_noise_spectrum_aliases(expression_manager, header.get("Plotname", ""))
             # process aliasses
             if len(aliasses) > 0:
                 # loop aliasses
