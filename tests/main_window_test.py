@@ -10,6 +10,9 @@ sys.modules.setdefault("PySide6.QtCore", MagicMock())
 sys.modules.setdefault("PySide6.QtGui", MagicMock())
 sys.modules.setdefault("PySide6.QtGraphs", MagicMock())
 sys.modules.setdefault("PySide6.QtQml", MagicMock())
+sys.modules.setdefault("PySide6.QtQuick", MagicMock())
+sys.modules.setdefault("PySide6.QtWebEngineWidgets", MagicMock())
+sys.modules.setdefault("PySide6.QtWidgets", MagicMock())
 # QmlElement and Slot must act as pass-through decorators so they do not replace the classes/methods with mocks
 sys.modules["PySide6.QtQml"].QmlElement = lambda f: f
 sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
@@ -116,6 +119,7 @@ class TestMainWindowSlots(TestCase):
         win._step_information = StepInformation([], [()], [slice(0, total)], [(0.0, float(total - 1))])
         win._decimate_target = _FALLBACK_DECIMATE_TARGET
         win._abscissa_scale = MagicMock(value="lin")
+        win._expression_manager = MagicMock(expressions=[])
         win._qraw_path = MagicMock()
         win._qraw_file = MagicMock()
         win._initial_selected_steps = None
@@ -302,6 +306,39 @@ class TestMainWindowSlots(TestCase):
         value = [args[0][1] for args in root.setProperty.call_args_list if args[0][0] == "stepToolVisible"][-1]
         self.assertIs(type(value), bool)
         self.assertTrue(value)
+
+    def test_on_qml_ready_sets_smith_chart_visible_when_s_parameters_present(self):
+        # arrange
+        win = self._make_win()
+        win._expression_manager = MagicMock()
+        expr = MagicMock(spec=Expression)
+        expr.name = "S11(1,0)"
+        expr._variable_type = "parameter"
+        win._expression_manager.expressions = [expr]
+        win._abscissa = MagicMock(unit="s")
+        win._qml_view = MagicMock()
+        root = MagicMock()
+        win._qml_view.rootObject.return_value = root
+        # act
+        with patch("viewer.main_window.QQuickView.Status.Ready", "READY"):
+            win._on_qml_ready("READY")
+        # assert
+        root.setProperty.assert_any_call("smithChartVisible", True)
+
+    def test_on_qml_ready_sets_smith_chart_hidden_when_s_parameters_absent(self):
+        # arrange
+        win = self._make_win()
+        win._expression_manager = MagicMock()
+        win._expression_manager.expressions = []
+        win._abscissa = MagicMock(unit="s")
+        win._qml_view = MagicMock()
+        root = MagicMock()
+        win._qml_view.rootObject.return_value = root
+        # act
+        with patch("viewer.main_window.QQuickView.Status.Ready", "READY"):
+            win._on_qml_ready("READY")
+        # assert
+        root.setProperty.assert_any_call("smithChartVisible", False)
 
     def test_size_hint_returns_1200_by_800(self):
         # arrange
