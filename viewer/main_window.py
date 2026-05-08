@@ -155,10 +155,12 @@ class MainWindow(QMainWindow):
             return
         # qml view root object
         self._root = self._qml_view.rootObject()
+        # analyze expressions to enable/disable Smith Chart support
+        smith_chart_expressions = [expression for expression in self._expression_manager.expressions if expression.name.startswith(("S11", "S22")) and expression.variable_type == "parameter"]
         # set window-level menu capability flags using built-in bool to avoid passing numpy.bool into QML properties
         self._root.setProperty("fftVisible", bool(self._abscissa.unit == "s"))
         self._root.setProperty("stepToolVisible", bool(self._step_information.length > 1))
-        self._root.setProperty("smithChartVisible", True)
+        self._root.setProperty("smithChartVisible", len(smith_chart_expressions) > 0)
         # connect signals from QML to Python handlers
         self._root.zoomRegionSelected.connect(self._on_zoom_region_selected)
         self._root.menuZoomToFit.connect(self._on_menu_zoom_to_fit)

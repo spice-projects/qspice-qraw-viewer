@@ -119,7 +119,8 @@ class TestMainWindowSlots(TestCase):
         win._step_information = StepInformation([], [()], [slice(0, total)], [(0.0, float(total - 1))])
         win._decimate_target = _FALLBACK_DECIMATE_TARGET
         win._abscissa_scale = MagicMock(value="lin")
-        win._expression_manager = MagicMock(expressions=[])
+        win._expression_manager = MagicMock()
+        win._expression_manager.expressions = []
         win._qraw_path = MagicMock()
         win._qraw_file = MagicMock()
         win._initial_selected_steps = None
@@ -310,10 +311,9 @@ class TestMainWindowSlots(TestCase):
     def test_on_qml_ready_sets_smith_chart_visible_when_s_parameters_present(self):
         # arrange
         win = self._make_win()
-        win._expression_manager = MagicMock()
         expr = MagicMock(spec=Expression)
         expr.name = "S11(1,0)"
-        expr._variable_type = "parameter"
+        expr.variable_type = "parameter"
         win._expression_manager.expressions = [expr]
         win._abscissa = MagicMock(unit="s")
         win._qml_view = MagicMock()
@@ -328,7 +328,6 @@ class TestMainWindowSlots(TestCase):
     def test_on_qml_ready_sets_smith_chart_hidden_when_s_parameters_absent(self):
         # arrange
         win = self._make_win()
-        win._expression_manager = MagicMock()
         win._expression_manager.expressions = []
         win._abscissa = MagicMock(unit="s")
         win._qml_view = MagicMock()
