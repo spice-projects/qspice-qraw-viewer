@@ -277,6 +277,18 @@ class TestQspiceEvaluatorParity(TestCase):
         # assert
         np.testing.assert_array_almost_equal(result, [0.0, 20.0, 40.0])
 
+    def test_evaluate_db_function_with_s_parameter_probe(self):
+        # arrange — two-digit S/Z/Y/H probes are evaluated like V/I probes
+        parser = QspiceParser()
+        evaluator = QspiceEvaluator()
+        var = np.asarray([1.0 + 0.0j, 0.5 + 0.0j])
+        variables = {"S11(V1)": var}
+        tree = parser.parse_expression("db(S11(V1))")
+        # act
+        result = evaluator.evaluate(tree, variables)
+        # assert
+        np.testing.assert_array_almost_equal(result, [0.0, -6.020599913279624])
+
     def test_evaluate_sign_function(self):
         # arrange
         parser = QspiceParser()

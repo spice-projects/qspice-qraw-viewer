@@ -9,8 +9,9 @@ Item {
 
     property int _activeChartIndex: -1
     property int _activeChartSeriesCount: 0
-    property bool fftEnabled: false
-    property bool stepToolEnabled: false
+    property bool fftVisible: false
+    property bool stepToolVisible: false
+    property bool smithChartVisible: false
 
     signal zoomRegionSelected(int chartIndex, real x0Ratio, real y0Ratio, real x1Ratio, real y1Ratio)
     signal menuZoomToFit(int chartIndex)
@@ -23,6 +24,7 @@ Item {
     signal menuNewWindow()
     signal menuFft(int chartIndex)
     signal menuStepTool(int chartIndex)
+    signal menuSmithChart(int chartIndex)
     signal pointerMoved(int chartIndex, real xRatio)
     signal pointerExited(int chartIndex)
 
@@ -604,15 +606,22 @@ Item {
             ContextMenuSeparator {}
             ContextMenuItem {
                 itemText: "FFT..."
-                enabled: root.fftEnabled && root._activeChartSeriesCount > 0
+                visible: root.fftVisible && root._activeChartSeriesCount > 0
                 onTriggered: root.menuFft(root._activeChartIndex)
             }
             ContextMenuItem {
                 itemText: "Step Tool..."
-                enabled: root.stepToolEnabled
+                visible: root.stepToolVisible
                 onTriggered: root.menuStepTool(root._activeChartIndex)
             }
-            ContextMenuSeparator {}
+            ContextMenuItem {
+                itemText: "Smith Chart..."
+                visible: root.smithChartVisible
+                onTriggered: root.menuSmithChart(root._activeChartIndex)
+            }
+            ContextMenuSeparator {
+                visible: (root.fftVisible && root._activeChartSeriesCount > 0) || root.stepToolVisible || root.smithChartVisible
+            }
             ContextMenuItem {
                 itemText: "Add Chart"
                 onTriggered: root.menuAddChart(root._activeChartIndex)

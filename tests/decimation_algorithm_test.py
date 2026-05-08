@@ -62,6 +62,9 @@ class TestDecimationAlgorithm(TestCase):
     def test_average_short_circuit(self):
         self._assert_short_circuit(DecimationAlgorithm.AVERAGE)
 
+    def test_rdp_short_circuit(self):
+        self._assert_short_circuit(DecimationAlgorithm.RDP)
+
     def test_xy_nth_point_short_circuit(self):
         self._assert_xy_short_circuit(DecimationAlgorithm.NTH_POINT)
 
@@ -77,12 +80,15 @@ class TestDecimationAlgorithm(TestCase):
     def test_xy_average_short_circuit(self):
         self._assert_xy_short_circuit(DecimationAlgorithm.AVERAGE)
 
+    def test_xy_rdp_short_circuit(self):
+        self._assert_xy_short_circuit(DecimationAlgorithm.RDP)
+
     def test_xy_short_circuit_strided_inputs_become_contiguous(self):
         # arrange
         matrix = np.arange(400, dtype=np.float64).reshape(100, 4)
         x = matrix[:, 0]
         y = matrix[:, 1]
-        for algorithm in [DecimationAlgorithm.NTH_POINT, DecimationAlgorithm.MIN_MAX, DecimationAlgorithm.M4, DecimationAlgorithm.LTTB, DecimationAlgorithm.AVERAGE]:
+        for algorithm in [DecimationAlgorithm.NTH_POINT, DecimationAlgorithm.MIN_MAX, DecimationAlgorithm.M4, DecimationAlgorithm.LTTB, DecimationAlgorithm.RDP, DecimationAlgorithm.AVERAGE]:
             # test for algo
             with self.subTest(algorithm=algorithm):
                 # act
@@ -139,6 +145,9 @@ class TestDecimationAlgorithm(TestCase):
 
     def test_average_length(self):
         self._assert_length_le_target(DecimationAlgorithm.AVERAGE)
+
+    def test_rdp_length(self):
+        self._assert_length_le_target(DecimationAlgorithm.RDP)
 
     def test_last_point_always_included(self):
         # arrange
@@ -275,6 +284,23 @@ class TestDecimationAlgorithm(TestCase):
         # assert
         self.assertTrue(_is_subset_of(result, values))
 
+    def test_rdp_output_is_subset_of_input(self):
+        # arrange
+        values = _sine(10_000)
+        # act
+        result = decimate(values, 100, DecimationAlgorithm.RDP)
+        # assert
+        self.assertTrue(_is_subset_of(result, values))
+
+    def test_rdp_first_and_last_preserved(self):
+        # arrange
+        values = _sine(10_000)
+        # act
+        result = decimate(values, 100, DecimationAlgorithm.RDP)
+        # assert
+        self.assertAlmostEqual(float(result[0]), float(values[0]))
+        self.assertAlmostEqual(float(result[-1]), float(values[-1]))
+
     def test_lttb_target_one_returns_first(self):
         # arrange
         values = _sine(500)
@@ -384,6 +410,9 @@ class TestDecimationAlgorithm(TestCase):
 
     def test_xy_lttb_coherent(self):
         self._assert_xy_coherent(DecimationAlgorithm.LTTB)
+
+    def test_xy_rdp_coherent(self):
+        self._assert_xy_coherent(DecimationAlgorithm.RDP)
 
     def test_xy_average_coherent(self):
         self._assert_xy_coherent(DecimationAlgorithm.AVERAGE)

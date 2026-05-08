@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtCore import QUrl, Qt, Slot
 from PySide6.QtGui import QColor
@@ -17,11 +18,13 @@ _BG = "#1a1b1e"
 
 class AddPlotDialog(QDialog):
 
-    def __init__(self, expressions_manager: ExpressionManager, selected_expressions: list[Expression], parent=None):
+    def __init__(self, parent: QWidget, expressions_manager: ExpressionManager, selected_expressions: list[Expression], allow_custom_expressions: bool = True, expression_filter: Callable[[Expression], bool] = lambda expression: True):
         super().__init__(parent)
         # store expressions for index mapping when reading back the selection
         self._expressions_manager = expressions_manager
         self._selected_expressions: set[Expression] = set(selected_expressions)
+        self._allow_custom_expressions = allow_custom_expressions
+        self._expression_filter = expression_filter
         # window setup
         self.setWindowTitle("Add Plot")
         self.setWindowModality(Qt.WindowModality.WindowModal)
@@ -45,13 +48,15 @@ class AddPlotDialog(QDialog):
             return
         # connect QML dialog signals to Python accept / reject
         root = self._qml_view.rootObject()
+        # properties
+        root.setProperty("allowCustomExpressions", self._allow_custom_expressions)
         # signals
         root.dialogAccepted.connect(self.accept)
         root.dialogRejected.connect(self.reject)
         root.selectionChanged.connect(self._on_selection_changed)
         root.customExpressionRequested.connect(self._on_custom_expression_requested)
         # initialize view
-        root.initialize([[v.name, v in self._selected_expressions] for v in self._expressions_manager.expressions])
+        root.initialize([[v.name, v in self._selected_expressions] for v in self._expressions_manager.expressions if self._expression_filter(v)])
 
     @Slot(str, bool)
     def _on_selection_changed(self, expression: str, selected: bool):
