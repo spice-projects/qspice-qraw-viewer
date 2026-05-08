@@ -13,7 +13,7 @@ A lightweight PySide6/QML desktop application to parse and view QSPICE `.qraw` b
 ## Requirements
 
 - Python 3.12+
-- PySide6 6.7+
+- PySide6 6.11+
 - numpy
 
 Install runtime dependencies with:

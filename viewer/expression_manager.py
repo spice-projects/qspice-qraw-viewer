@@ -6,6 +6,7 @@ from .expression import Expression
 from .qspice_language.evaluator import QspiceEvaluator
 from .qspice_language.nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, StepSelectorNode, TernaryOperationNode, UnaryOperationNode
 from .qspice_language.parser import QspiceParser
+from .qspice_language.probe_names import is_network_parameter_probe_name
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +37,33 @@ class ExpressionManager:
         self._evaluator = QspiceEvaluator()
         # store optional step slice metadata for @N selector evaluation
         self._step_slices = step_slices
+        # store function definitions
+        self._function_definitions = function_definitions
         # parse user-defined .func definitions; keys are lowercased for case-insensitive lookup
         self._functions: dict[str, FunctionDefinitionNode] = {}
+        # loop definitions
         for func_text in (function_definitions or []):
             try:
+                # parse the .func definition and store it in the function context
                 definition = self._parser.parse_function_definition(func_text)
+                # store the function definition using a lowercased key for case-insensitive lookup
                 self._functions[definition.name.casefold()] = definition
             except ValueError as e:
+                # log information
                 logger.warning("Failed to parse .func definition %r: %s", func_text, e)
 
     @property
     def expressions(self) -> list[Expression]:
         # do not show calculated expressions in the list of expressions
         return list(self._context.values())
+
+    @property
+    def function_definitions(self) -> list[str] | None:
+        return self._function_definitions
+
+    @property
+    def step_slices(self) -> tuple[slice, ...] | None:
+        return self._step_slices
 
     def evaluate(self, expression: str, name: str | None = None) -> Expression | None:
         # context key
@@ -158,6 +173,8 @@ class ExpressionManager:
             # resolve probe units using probe references
             if function_name in ("v", "i", "id"):
                 return self._unit_for_probe(node, unit_context)
+            if is_network_parameter_probe_name(function_name) and self._probe_key(node).casefold() in unit_context:
+                return self._unit_for_probe(node, unit_context)
             # delegate unit inference to user-defined function body
             definition = self._functions.get(function_name)
             if definition is not None:
@@ -235,14 +252,25 @@ class ExpressionManager:
         probe_key = self._probe_key(probe).casefold()
         # resolve a directly stored probe unit
         direct_unit = unit_context.get(probe_key)
-        if direct_unit is not None:
+        if direct_unit not in (None, ""):
             return direct_unit
         # infer known probe family units
         lower_name = probe.name.casefold()
+        # voltage
         if lower_name == "v":
             return "V"
+        # current
         if lower_name in ("i", "id"):
             return "A"
+        # network parameters (Z, Y, S, H)
+        if is_network_parameter_probe_name(lower_name):
+            # impedance
+            if lower_name.startswith("z"):
+                return "Ω"
+            # admittance
+            if lower_name.startswith("y"):
+                return "S"
+        # no unit
         return ""
 
     @staticmethod

@@ -11,6 +11,7 @@ Item {
     property var selectionState: ({})
     property string filterText: ""
     property string expressionError: ""
+    property bool allowCustomExpressions: true
 
     readonly property var filteredExpressions: {
         var text = filterText.toLowerCase()
@@ -187,6 +188,7 @@ Item {
     // custom expression input section
     Rectangle {
         id: customExprRow
+        visible: root.allowCustomExpressions
         anchors { bottom: buttonBar.top; left: parent.left; right: parent.right }
         height: root.expressionError !== "" ? 72 : 50
         color: "#16171e"

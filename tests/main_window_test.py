@@ -13,7 +13,8 @@ sys.modules.setdefault("PySide6.QtQml", MagicMock())
 sys.modules.setdefault("PySide6.QtQuick", MagicMock())
 sys.modules.setdefault("PySide6.QtWebEngineWidgets", MagicMock())
 sys.modules.setdefault("PySide6.QtWidgets", MagicMock())
-# Slot must act as a pass-through decorator so @Slot(...) does not replace the method with a mock
+# QmlElement and Slot must act as pass-through decorators so they do not replace the classes/methods with mocks
+sys.modules["PySide6.QtQml"].QmlElement = lambda f: f
 sys.modules["PySide6.QtCore"].Slot = lambda *a, **kw: (lambda f: f)
 # QMainWindow must be a concrete class so that MainWindow can genuinely inherit from it
 sys.modules["PySide6.QtWidgets"].QMainWindow = type("QMainWindow", (), {})
@@ -118,6 +119,8 @@ class TestMainWindowSlots(TestCase):
         win._step_information = StepInformation([], [()], [slice(0, total)], [(0.0, float(total - 1))])
         win._decimate_target = _FALLBACK_DECIMATE_TARGET
         win._abscissa_scale = MagicMock(value="lin")
+        win._expression_manager = MagicMock()
+        win._expression_manager.expressions = []
         win._qraw_path = MagicMock()
         win._qraw_file = MagicMock()
         win._initial_selected_steps = None
@@ -204,7 +207,7 @@ class TestMainWindowSlots(TestCase):
         created_window = MagicMock()
         # act
         with patch("viewer.main_window.MainWindow", return_value=created_window) as mock_main_window:
-            with patch("viewer.main_window._register_child_window") as mock_register:
+            with patch("viewer.main_window.register_child_window") as mock_register:
                 win._on_menu_new_window()
         # assert
         mock_main_window.assert_called_once_with(win._qraw_file, source_qraw_path=win._qraw_path, start_empty=True)
@@ -218,7 +221,7 @@ class TestMainWindowSlots(TestCase):
         # act
         with patch("viewer.main_window.QFileDialog.getOpenFileName", return_value=("/tmp/example.qraw", "QRAW Files (*.qraw)")):
             with patch("viewer.main_window.open_qraw_as_window", return_value=created_window) as mock_open:
-                with patch("viewer.main_window._register_child_window") as mock_register:
+                with patch("viewer.main_window.register_child_window") as mock_register:
                     win._on_menu_open_file()
         # assert
         mock_open.assert_called_once()
@@ -231,7 +234,7 @@ class TestMainWindowSlots(TestCase):
         # act
         with patch("viewer.main_window.QFileDialog.getOpenFileName", return_value=("", "QRAW Files (*.qraw)")):
             with patch("viewer.main_window.open_qraw_as_window") as mock_open:
-                with patch("viewer.main_window._register_child_window") as mock_register:
+                with patch("viewer.main_window.register_child_window") as mock_register:
                     win._on_menu_open_file()
         # assert
         mock_open.assert_not_called()
@@ -243,7 +246,7 @@ class TestMainWindowSlots(TestCase):
         # act
         with patch("viewer.main_window.QFileDialog.getOpenFileName", return_value=("/tmp/bad.qraw", "QRAW Files (*.qraw)")):
             with patch("viewer.main_window.open_qraw_as_window", return_value=None) as mock_open:
-                with patch("viewer.main_window._register_child_window") as mock_register:
+                with patch("viewer.main_window.register_child_window") as mock_register:
                     win._on_menu_open_file()
         # assert
         mock_open.assert_called_once()
@@ -273,7 +276,7 @@ class TestMainWindowSlots(TestCase):
         with patch("viewer.main_window.QQuickView.Status.Ready", "READY"):
             win._on_qml_ready("READY")
         # assert
-        root.setProperty.assert_any_call("stepToolEnabled", True)
+        root.setProperty.assert_any_call("stepToolVisible", True)
 
     def test_on_qml_ready_sets_step_tool_disabled_for_single_step_files(self):
         # arrange
@@ -287,7 +290,7 @@ class TestMainWindowSlots(TestCase):
         with patch("viewer.main_window.QQuickView.Status.Ready", "READY"):
             win._on_qml_ready("READY")
         # assert
-        root.setProperty.assert_any_call("stepToolEnabled", False)
+        root.setProperty.assert_any_call("stepToolVisible", False)
 
     def test_on_qml_ready_converts_numpy_step_bool_to_python_bool(self):
         # arrange
@@ -301,9 +304,40 @@ class TestMainWindowSlots(TestCase):
         with patch("viewer.main_window.QQuickView.Status.Ready", "READY"):
             win._on_qml_ready("READY")
         # assert
-        value = [args[0][1] for args in root.setProperty.call_args_list if args[0][0] == "stepToolEnabled"][-1]
+        value = [args[0][1] for args in root.setProperty.call_args_list if args[0][0] == "stepToolVisible"][-1]
         self.assertIs(type(value), bool)
         self.assertTrue(value)
+
+    def test_on_qml_ready_sets_smith_chart_visible_when_s_parameters_present(self):
+        # arrange
+        win = self._make_win()
+        expr = MagicMock(spec=Expression)
+        expr.name = "S11(1,0)"
+        expr.variable_type = "parameter"
+        win._expression_manager.expressions = [expr]
+        win._abscissa = MagicMock(unit="s")
+        win._qml_view = MagicMock()
+        root = MagicMock()
+        win._qml_view.rootObject.return_value = root
+        # act
+        with patch("viewer.main_window.QQuickView.Status.Ready", "READY"):
+            win._on_qml_ready("READY")
+        # assert
+        root.setProperty.assert_any_call("smithChartVisible", True)
+
+    def test_on_qml_ready_sets_smith_chart_hidden_when_s_parameters_absent(self):
+        # arrange
+        win = self._make_win()
+        win._expression_manager.expressions = []
+        win._abscissa = MagicMock(unit="s")
+        win._qml_view = MagicMock()
+        root = MagicMock()
+        win._qml_view.rootObject.return_value = root
+        # act
+        with patch("viewer.main_window.QQuickView.Status.Ready", "READY"):
+            win._on_qml_ready("READY")
+        # assert
+        root.setProperty.assert_any_call("smithChartVisible", False)
 
     def test_size_hint_returns_1200_by_800(self):
         # arrange
@@ -319,7 +353,7 @@ class TestMainWindowSlots(TestCase):
         win = MainWindow.__new__(MainWindow)
         event = MagicMock()
         # act
-        with patch("viewer.main_window._unregister_child_window") as mock_unregister:
+        with patch("viewer.main_window.unregister_child_window") as mock_unregister:
             win.closeEvent(event)
         # assert
         mock_unregister.assert_called_once_with(win)
@@ -581,7 +615,7 @@ class TestMultiStepFft(TestCase):
                 with patch("viewer.main_window.MainWindow", fake_main_window):
                     with patch("viewer.main_window.compute_fft_many") as mock_fft:
                         with patch("viewer.main_window.ExpressionManager"):
-                            with patch("viewer.main_window._register_child_window") as mock_register:
+                            with patch("viewer.main_window.register_child_window") as mock_register:
                                 freq = np.linspace(0, 500, 33)
                                 mock_fft.return_value = (freq, np.ones((steps, 33)))
                                 win._on_menu_fft(0)

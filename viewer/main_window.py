@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QSize, QTimer, QUrl, Slot
-from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QKeySequence
 from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QWidget
 
@@ -17,18 +17,13 @@ from .fft import FftOutput, compute_fft_many
 from .fft_dialog import FftDialog
 from .jupyter_window import JupyterWindow
 from .qraw_file import AbscissaScale, QRawFile, StepInformation
+from .smith_chart_window import SmithChartWindow
 from .step_tool_dialog import StepToolDialog
+from .window import load_app_icon, log_screen_info, register_child_window, unregister_child_window
 
 logger = logging.getLogger(__name__)
 
 _QML_FILE = Path(__file__).parent / "main_window.qml"
-_RESOURCE_DIR = Path(__file__).parent / "resources"
-_ICON_PATH = _RESOURCE_DIR / "waveform-window-icon.ico"
-
-
-def load_app_icon() -> QIcon:
-    return QIcon(str(_ICON_PATH))
-
 
 # background color matching the chart dark theme
 _BG = "#1a1b1e"
@@ -36,20 +31,8 @@ _BG = "#1a1b1e"
 # minimum interval between status-bar updates (≈30 fps)
 _MIN_STATUS_INTERVAL = 1.0 / 30
 
-# application-level registry keeps child windows alive independently
-# of the source main window that created them
-_CHILD_WINDOWS: set[QMainWindow] = set()
-
 # application-level open-file dialog lock prevents stacked dialogs
 _OPEN_FILE_DIALOG_ACTIVE = False
-
-
-def _register_child_window(window: QMainWindow) -> None:
-    _CHILD_WINDOWS.add(window)
-
-
-def _unregister_child_window(window: QMainWindow) -> None:
-    _CHILD_WINDOWS.discard(window)
 
 
 def _format_value(value: float, unit: str) -> str:
@@ -125,18 +108,17 @@ class MainWindow(QMainWindow):
         self._expression_manager = qraw_file.expression_manager
         self._step_information = qraw_file.step_information
         self._steps = self._step_information.length
-        # normalize numpy scalar to built-in int for stable Qt property marshalling
         self._plot_suggestions = [] if start_empty else qraw_file.get_plot_suggestions()
         # store the simulation file path for use by the Jupyter integration
         self._qraw_path = source_qraw_path if source_qraw_path is not None else qraw_file.filename
+        # optional initial step selection applied when charts are first created (used by FFT windows to pre-focus on the same steps the user was viewing in the source chart)
+        self._initial_selected_steps: set[int] | None = None
         # set window title to include the loaded filename
         self.setWindowTitle(f"{self._default_chart_type} - {qraw_file.filename.name}")
         # apply dark background stylesheet to the window chrome
         self.setStyleSheet(f"QMainWindow {{ background: {_BG}; }}")
         # initialize data structures
         self._charts: list[Chart] = []
-        # optional initial step selection applied when charts are first created (used by FFT windows to pre-focus on the same steps the user was viewing in the source chart)
-        self._initial_selected_steps: set[int] | None = None
         # keep Jupyter windows alive to prevent garbage collection
         self._jupyter_windows: list[JupyterWindow] = []
         # single QQuickView hosts the entire multi-chart scene — one Metal swap chain
@@ -160,7 +142,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         # release application-level child window ownership when this window closes
-        _unregister_child_window(self)
+        unregister_child_window(self)
         # delegate to the Qt base class when available
         close_event = getattr(super(), "closeEvent", None)
         if close_event is not None:
@@ -173,9 +155,12 @@ class MainWindow(QMainWindow):
             return
         # qml view root object
         self._root = self._qml_view.rootObject()
-        # set window-level menu capability flags using built-in bool to avoid passing numpy.bool_ into QML properties
-        self._root.setProperty("fftEnabled", bool(self._abscissa.unit == "s"))
-        self._root.setProperty("stepToolEnabled", bool(self._step_information.length > 1))
+        # analyze expressions to enable/disable Smith Chart support
+        smith_chart_expressions = [expression for expression in self._expression_manager.expressions if expression.name.startswith(("S11", "S22")) and expression.variable_type == "parameter"]
+        # set window-level menu capability flags using built-in bool to avoid passing numpy.bool into QML properties
+        self._root.setProperty("fftVisible", bool(self._abscissa.unit == "s"))
+        self._root.setProperty("stepToolVisible", bool(self._step_information.length > 1))
+        self._root.setProperty("smithChartVisible", len(smith_chart_expressions) > 0)
         # connect signals from QML to Python handlers
         self._root.zoomRegionSelected.connect(self._on_zoom_region_selected)
         self._root.menuZoomToFit.connect(self._on_menu_zoom_to_fit)
@@ -188,6 +173,7 @@ class MainWindow(QMainWindow):
         self._root.menuNewWindow.connect(self._on_menu_new_window)
         self._root.menuFft.connect(self._on_menu_fft)
         self._root.menuStepTool.connect(self._on_menu_step_tool)
+        self._root.menuSmithChart.connect(self._on_menu_smith_chart)
         # connect pointer hover signals to update the status bar
         self._root.pointerMoved.connect(self._on_pointer_moved)
         self._root.pointerExited.connect(self._on_pointer_exited)
@@ -195,7 +181,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._populate_charts)
         # log screen information for debugging purposes
         if logger.isEnabledFor(logging.DEBUG):
-            QTimer.singleShot(0, self._log_screen_info)
+            QTimer.singleShot(0, lambda: log_screen_info(self.screen()))
 
     def _create_main_menu(self):
         # menu bar
@@ -264,16 +250,6 @@ class MainWindow(QMainWindow):
         for suggestion in self._plot_suggestions:
             # append chart using the type encoded in the suggestion
             self._add_chart(suggestion.chart_type, suggestion.expressions)
-
-    def _log_screen_info(self):
-        # screen reference
-        screen = self.screen()
-        # log information
-        logger.debug("Screen information:")
-        logger.debug("Screen name: %s", screen.name())
-        logger.debug("Screen size: %d x %d", screen.size().width(), screen.size().height())
-        logger.debug("Device pixel ratio: %f", screen.devicePixelRatio())
-        logger.debug("Refresh rate: %f", screen.refreshRate())
 
     def _add_chart(self, chart_type: str, expressions: list[Expression]):
         # chart index
@@ -347,7 +323,7 @@ class MainWindow(QMainWindow):
         # find chart at index
         chart = self._charts[chart_index]
         # open the add plot dialog
-        dialog = AddPlotDialog(self._expression_manager, chart.expressions, self)
+        dialog = AddPlotDialog(self, self._expression_manager, chart.expressions)
         # exit if the user cancelled
         if dialog.exec() != AddPlotDialog.DialogCode.Accepted:
             return
@@ -387,7 +363,7 @@ class MainWindow(QMainWindow):
         # create a new independent main window sharing the same source data and path
         new_window = MainWindow(self._qraw_file, source_qraw_path=self._qraw_path, start_empty=True)
         # keep reference alive independently of the source main window
-        _register_child_window(new_window)
+        register_child_window(new_window)
         # show the new window
         new_window.show()
 
@@ -412,7 +388,7 @@ class MainWindow(QMainWindow):
         if new_window is None:
             return
         # keep reference alive independently of the source main window
-        _register_child_window(new_window)
+        register_child_window(new_window)
         # show the new window
         new_window.show()
 
@@ -436,6 +412,25 @@ class MainWindow(QMainWindow):
         chart.selected_steps = dialog.selected_steps
         # auto range axes
         chart.auto_range()
+
+    @Slot(int)
+    def _on_menu_smith_chart(self, chart_index: int):
+        # log information
+        logger.debug("User requested Smith chart on chart at index: %d", chart_index)
+        # filter expressions to those suitable for Smith charting (network parameters with complex data)
+        expressions = [expression for expression in self._expression_manager.expressions if expression.name.startswith(("S11", "S22")) and expression.variable_type == "parameter"]
+        # visualize the first expression
+        plot_suggestion = f"\xab{expressions[0].name}\xbb" if expressions else ""
+        # create expression manager
+        expression_manager = ExpressionManager([self._qraw_file.abscissa] + expressions, self._expression_manager.function_definitions, self._expression_manager.step_slices)
+        # create qraw file with fft calculation results
+        qraw_file = QRawFile(filename=self._qraw_path, title=self._qraw_file.title, date=self._qraw_file.date, plotname=self._qraw_file.plotname, complex=self._qraw_file.complex, step_information=self._qraw_file.step_information, abscissa=self._qraw_file.abscissa, abscissa_scale=self._qraw_file.abscissa_scale, command=self._qraw_file.command, plot_suggestion=plot_suggestion, expression_manager=expression_manager, chart_type=self._qraw_file.chart_type)
+        # create a new SmithChart Window
+        smith_window = SmithChartWindow(qraw_file)
+        # keep reference alive independently of the source main window
+        register_child_window(smith_window)
+        # show the Smith chart window
+        smith_window.show()
 
     @Slot(int)
     def _on_menu_fft(self, chart_index: int):
@@ -573,7 +568,7 @@ class MainWindow(QMainWindow):
         source_to_fft_index = {source_step: fft_step for fft_step, source_step in enumerate(fft_steps)}
         fft_window._initial_selected_steps = {source_to_fft_index[source_step] for source_step in chart.selected_steps if source_step in source_to_fft_index}
         # keep reference alive independently of the source main window
-        _register_child_window(fft_window)
+        register_child_window(fft_window)
         # show the FFT result window
         fft_window.show()
 

@@ -5,6 +5,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGraphs import QAbstractAxis, QLineSeries
 from PySide6.QtQuick import QQuickItem
 
+from .color_palette import SERIES_COLOR_PALETTE
 from .decimation_algorithm import DecimationAlgorithm, decimate_xy
 from .expression import Expression
 from .expression_manager import ExpressionManager
@@ -14,24 +15,6 @@ logger = logging.getLogger(__name__)
 
 # default decimation algorithm used when adding series to charts
 _DECIMATION_ALGORITHM = DecimationAlgorithm.M4
-
-# series colors
-_SERIES_COLOR_PALETTE = [
-    "#f77f00",  # orange
-    "#3a86ff",  # blue
-    "#ffdd00",  # yellow
-    "#9b5de5",  # indigo
-    "#00b4d8",  # cyan
-    "#ff8fa3",  # pink
-    "#80ff72",  # green
-    "#e040fb",  # purple
-    "#ff4365",  # red
-    "#00f5d4",  # teal
-    "#f4a261",  # apricot
-    "#8ac926",  # lime
-    "#4cc9f0",  # sky cyan
-    "#bbdefb"   # pale blue
-]
 
 
 def _binary_search(data: np.ndarray, value: float, ascending: bool, side: int) -> int:
@@ -208,7 +191,7 @@ class Chart:
                 # check we need to generate a color for this expression
                 if color is None:
                     # assign next color in palette
-                    color = _SERIES_COLOR_PALETTE[self._next_color_index % len(_SERIES_COLOR_PALETTE)]
+                    color = SERIES_COLOR_PALETTE[self._next_color_index % len(SERIES_COLOR_PALETTE)]
                     # update index
                     self._next_color_index += 1
                 # ordinate series to render

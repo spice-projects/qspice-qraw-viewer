@@ -212,6 +212,39 @@ class TestExpressionManager(TestCase):
         self.assertEqual(result.unit, "dB")
         np.testing.assert_array_almost_equal(result.data, [0.0, 20.0, 40.0])
 
+    def test_evaluate_function_db_accepts_network_parameter_probe(self):
+        # arrange — network parameters such as S11(V1) are stored in the expression context
+        expr = Expression("S11(V1)", np.array([1.0 + 0.0j, 0.5 + 0.0j]), "")
+        manager = ExpressionManager([expr])
+        # act
+        result = manager.evaluate("db(S11(V1))")
+        # assert
+        self.assertIsNotNone(result)
+        self.assertEqual(result.unit, "dB")
+        np.testing.assert_array_almost_equal(result.data, [0.0, -6.020599913279624])
+
+    def test_evaluate_function_abs_accepts_impedance_probe(self):
+        # arrange — impedance parameters should infer ohms even when raw unit metadata is empty
+        expr = Expression("Z11(V1)", np.array([50.0 + 0.0j, 75.0 + 0.0j]), "")
+        manager = ExpressionManager([expr])
+        # act
+        result = manager.evaluate("abs(Z11(V1))")
+        # assert
+        self.assertIsNotNone(result)
+        self.assertEqual(result.unit, "Ω")
+        np.testing.assert_array_almost_equal(result.data, [50.0, 75.0])
+
+    def test_evaluate_function_abs_accepts_admittance_probe(self):
+        # arrange — admittance parameters should infer siemens even when raw unit metadata is empty
+        expr = Expression("Y11(V1)", np.array([0.02 + 0.0j, 0.01 + 0.0j]), "")
+        manager = ExpressionManager([expr])
+        # act
+        result = manager.evaluate("abs(Y11(V1))")
+        # assert
+        self.assertIsNotNone(result)
+        self.assertEqual(result.unit, "S")
+        np.testing.assert_array_almost_equal(result.data, [0.02, 0.01])
+
     def test_evaluate_function_angle_returns_degrees_unit(self):
         # arrange — angle of a purely real positive number is 0°
         expr = Expression("V(R1)", np.array([1.0 + 0j, 0.0 + 1j]), "V")

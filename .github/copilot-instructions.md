@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-QSPICE QRAW Waveform Viewer — a PySide6/QML desktop app that parses binary `.qraw` simulation output files from QSPICE and renders waveform data using `QLineSeries.replaceNp` (zero-copy numpy → Qt). Requires Python ≥ 3.12 and PySide6 ≥ 6.7.
+QSPICE QRAW Waveform Viewer — a PySide6/QML desktop app that parses binary `.qraw` simulation output files from QSPICE and renders waveform data using `QLineSeries.replaceNp` (zero-copy numpy → Qt). Requires Python ≥ 3.12 and PySide6 ≥ 6.11.
 
 ## Build and Test
 

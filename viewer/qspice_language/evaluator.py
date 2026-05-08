@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 
@@ -7,6 +5,7 @@ import numpy as np
 
 from .builtins import BUILTIN_CONSTANTS, BUILTIN_FUNCTIONS, QspiceValue
 from .nodes import BinaryOperationNode, BinaryOperator, ExpressionNode, FunctionCallNode, FunctionDefinitionNode, IdentifierNode, NumberNode, StepSelectorNode, TernaryOperationNode, UnaryOperationNode, UnaryOperator
+from .probe_names import is_network_parameter_probe_name
 
 
 _NUMBER_SUFFIXES: dict[str, float] = {
@@ -149,8 +148,8 @@ class QspiceEvaluator:
     def _evaluate_function_call(self, expression: FunctionCallNode, context: EvaluationContext, call_stack: tuple[str, ...]) -> QspiceValue:
         # normalize the function name
         function_name = expression.name.casefold()
-        # check for SPICE probe functions (V, I, Id, etc.)
-        if function_name in ("v", "i", "id") and len(expression.args) > 0:
+        # check for probe-style references stored directly in the variable context
+        if self._is_probe_call(expression, context):
             return self._evaluate_probe(expression, context, call_stack)
         # look up a builtin implementation
         builtin = BUILTIN_FUNCTIONS.get(function_name)
@@ -177,6 +176,33 @@ class QspiceEvaluator:
         local_context = EvaluationContext(local_variables, context.functions, context.constants, context.step_slices)
         # evaluate the function body
         return self._evaluate(definition.body, local_context, call_stack + (function_name,))
+
+    def _is_probe_call(self, expression: FunctionCallNode, context: EvaluationContext) -> bool:
+        # normalize the function name
+        function_name = expression.name.casefold()
+        # canonical SPICE probe families are always treated as probes
+        if function_name in ("v", "i", "id") and len(expression.args) > 0:
+            return True
+        # only two-digit S/Z/Y/H names are treated as network-parameter probes
+        if not is_network_parameter_probe_name(function_name):
+            return False
+        # probe-style network parameters accept only simple identifier/number arguments
+        if not self._has_simple_probe_args(expression):
+            return False
+        # reconstruct the stored variable key and resolve it directly from the context
+        probe_key = self._reconstruct_probe_name(expression).casefold()
+        # it must be in the variables to be treated as a probe reference
+        return probe_key in context.variables
+
+    @staticmethod
+    def _has_simple_probe_args(expression: FunctionCallNode) -> bool:
+        # only identifiers and numeric literals are valid probe-node arguments
+        for arg in expression.args:
+            # arguments must be simple identifiers or numbers; reject complex expressions to avoid ambiguity with function calls and ensure consistent probe naming
+            if not isinstance(arg, (IdentifierNode, NumberNode)):
+                return False
+        # ok
+        return True
 
     def _evaluate_probe(self, expression: FunctionCallNode, context: EvaluationContext, call_stack: tuple[str, ...]) -> QspiceValue:
         # reconstruct the probe reference name from arguments

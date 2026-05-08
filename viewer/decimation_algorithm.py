@@ -44,6 +44,13 @@ LTTB       – Largest Triangle Three Buckets.  For each output point it picks
               plots).  May miss very narrow spikes because it optimises shape
               rather than extremes.
 
+RDP        – Ramer-Douglas-Peucker polyline simplification.  Selects the
+              smallest subset of original samples whose piecewise-linear
+              interpolation stays within a tolerance of the original curve.
+              Here tolerance is auto-tuned (binary search) so output has at
+              most *target* points while preserving endpoints.  Works well for
+              traces with long nearly-linear stretches and occasional bends.
+
 AVERAGE    – Replaces each bucket with its arithmetic mean.  Smooths
               high-frequency noise and gives a clean envelope view.  Hides
               transients and peak values — useful for noisy measurements where
@@ -69,6 +76,7 @@ class DecimationAlgorithm(enum.Enum):
     MIN_MAX = "min_max"
     M4 = "m4"
     LTTB = "lttb"
+    RDP = "rdp"
     AVERAGE = "average"
 
 
@@ -230,6 +238,93 @@ def _lttb_indices(x: np.ndarray, values: np.ndarray, target: int) -> np.ndarray:
     return out_indices
 
 
+def _rdp_indices_for_epsilon(x: np.ndarray, values: np.ndarray, epsilon: float) -> np.ndarray:
+    # vector length
+    length = len(values)
+    # initialize keep mask and always preserve endpoints
+    keep_mask = np.zeros(length, dtype=bool)
+    keep_mask[0] = True
+    keep_mask[-1] = True
+    # stack of segments to process (iterative form avoids recursion limits)
+    segment_stack: list[tuple[int, int]] = [(0, length - 1)]
+    # process all segments
+    while segment_stack:
+        # pop one segment
+        start_index, end_index = segment_stack.pop()
+        # segments with no interior points are already simplified
+        if end_index <= start_index + 1:
+            continue
+        # segment endpoints
+        x_start = float(x[start_index])
+        y_start = float(values[start_index])
+        x_end = float(x[end_index])
+        y_end = float(values[end_index])
+        # interior candidate points
+        x_interior = x[start_index + 1:end_index]
+        y_interior = values[start_index + 1:end_index]
+        # guard against empty interior slice
+        if len(x_interior) == 0:
+            continue
+        # segment direction vector
+        dx = x_end - x_start
+        dy = y_end - y_start
+        # perpendicular distance from each interior point to the segment line
+        if dx == 0.0 and dy == 0.0:
+            distances = np.hypot(x_interior - x_start, y_interior - y_start)
+        else:
+            denominator = np.hypot(dx, dy)
+            distances = np.abs((x_interior - x_start) * dy - (y_interior - y_start) * dx) / denominator
+        # locate farthest interior point
+        farthest_relative_index = int(np.argmax(distances))
+        farthest_distance = float(distances[farthest_relative_index])
+        # keep and split only when the tolerance is exceeded
+        if farthest_distance > epsilon:
+            farthest_index = start_index + 1 + farthest_relative_index
+            keep_mask[farthest_index] = True
+            segment_stack.append((start_index, farthest_index))
+            segment_stack.append((farthest_index, end_index))
+    # return kept indices in ascending order
+    return np.flatnonzero(keep_mask).astype(np.int64)
+
+
+def _rdp_indices(x: np.ndarray, values: np.ndarray, target: int) -> np.ndarray:
+    length = len(values)
+    # explicit tiny-target handling keeps behavior aligned with other algorithms
+    if target <= 0:
+        return np.empty(0, dtype=np.int64)
+    if target == 1:
+        return np.array([0], dtype=np.int64)
+    if target == 2:
+        return np.array([0, length - 1], dtype=np.int64)
+    if length <= target:
+        return np.arange(length, dtype=np.int64)
+    # epsilon=0 keeps all points, epsilon=max_distance collapses to endpoints
+    epsilon_low = 0.0
+    x0 = float(x[0])
+    y0 = float(values[0])
+    x1 = float(x[-1])
+    y1 = float(values[-1])
+    dx = x1 - x0
+    dy = y1 - y0
+    if dx == 0.0 and dy == 0.0:
+        epsilon_high = float(np.max(np.hypot(x - x0, values - y0)))
+    else:
+        denom = float(np.hypot(dx, dy))
+        epsilon_high = float(np.max(np.abs((x - x0) * dy - (values - y0) * dx) / denom))
+    # binary-search epsilon so output length is as close as possible without exceeding target
+    best = _rdp_indices_for_epsilon(x, values, epsilon_high)
+    for _ in range(24):
+        epsilon_mid = (epsilon_low + epsilon_high) / 2.0
+        candidate = _rdp_indices_for_epsilon(x, values, epsilon_mid)
+        if len(candidate) > target:
+            epsilon_low = epsilon_mid
+        else:
+            best = candidate
+            epsilon_high = epsilon_mid
+    # final guard: if binary search lands below target due to discrete jumps, trim safely
+    return _trim_indices(best, target)
+
+
 # ---------------------------------------------------------------------------
 # Individual algorithm implementations (single-vector convenience wrappers)
 # ---------------------------------------------------------------------------
@@ -272,6 +367,17 @@ def _lttb(values: np.ndarray, target: int) -> np.ndarray:
     return values[_lttb_indices(x, values, target)]
 
 
+def _rdp(values: np.ndarray, target: int) -> np.ndarray:
+    # vector length
+    length = len(values)
+    # if we have fewer points than the target, just return the original array
+    if length <= target:
+        return values
+    # use sample index as x axis for single-vector decimation
+    x = np.arange(length, dtype=np.float64)
+    return values[_rdp_indices(x, values, target)]
+
+
 def _average(values: np.ndarray, target: int) -> np.ndarray:
     # vector length
     length = len(values)
@@ -303,6 +409,7 @@ _ALGORITHM_FN = {
     DecimationAlgorithm.MIN_MAX: _min_max,
     DecimationAlgorithm.M4: _m4,
     DecimationAlgorithm.LTTB: _lttb,
+    DecimationAlgorithm.RDP: _rdp,
     DecimationAlgorithm.AVERAGE: _average,
 }
 
@@ -407,6 +514,9 @@ def decimate_xy(x: np.ndarray, y: np.ndarray, target: int, algorithm: Decimation
         # both real and complex QRAW files; rfftfreq also returns float64 for the
         # FFT synthetic path) — pass it directly with no conversion
         indices = _lttb_indices(x, y, target)
+    elif algorithm == DecimationAlgorithm.RDP:
+        # use the real x axis so distance is computed in chart space
+        indices = _rdp_indices(x, y, target)
     else:
         raise ValueError(f"Unknown decimation algorithm: {algorithm}")
     # exit
