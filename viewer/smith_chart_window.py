@@ -2,18 +2,17 @@ import logging
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 from PySide6.QtCore import Q_ARG, QMetaObject, QPointF, QRect, QRectF, QSize, Qt, QTimer, QUrl, Slot
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QCloseEvent, QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtQml import QmlElement
 from PySide6.QtQuick import QQuickItem, QQuickView, QSGNode, QSGSimpleTextureNode, QSGTexture
 from PySide6.QtWidgets import QMainWindow, QWidget
 
 from .add_plot_dialog import AddPlotDialog
-from .app_open import open_qraw_as_window
 from .color_palette import SERIES_COLOR_PALETTE
 from .decimation_algorithm import decimate_xy, DecimationAlgorithm
 from .expression import Expression
-from .expression_manager import ExpressionManager
 from .qraw_file import QRawFile
 from .step_tool_dialog import StepToolDialog
 from .window import load_app_icon, log_screen_info, unregister_child_window
@@ -48,12 +47,12 @@ class SmithGridItem(QQuickItem):
         self._dirty = True
         self._image_size = (0, 0)
 
-    def geometryChange(self, new: QRectF | QRect, old: QRectF | QRect):
+    def geometryChange(self, new: QRectF | QRect, old: QRectF | QRect) -> None:
         super().geometryChange(new, old)
         self._dirty = True
         self.update()
 
-    def updatePaintNode(self, old_node: QSGNode, _data: QQuickItem.UpdatePaintNodeData) -> QSGNode:
+    def updatePaintNode(self, old_node: QSGNode | None, _data: QQuickItem.UpdatePaintNodeData) -> QSGNode | None:
         # check dirty flag
         if not self._dirty:
             return old_node
@@ -128,7 +127,7 @@ class SmithGridItem(QQuickItem):
 @QmlElement
 class SmithTraceItem(QQuickItem):
 
-    def __init__(self, parent: QQuickItem | None = None):
+    def __init__(self, parent: QQuickItem | None = None) -> None:
         super().__init__(parent)
         # initialize state
         self.setFlag(QQuickItem.Flag.ItemHasContents, True)
@@ -136,12 +135,12 @@ class SmithTraceItem(QQuickItem):
         self._texture = None
         self._dirty = True
 
-    def geometryChange(self, new: QRectF | QRect, old: QRectF | QRect):
+    def geometryChange(self, new: QRectF | QRect, old: QRectF | QRect) -> None:
         super().geometryChange(new, old)
         self._dirty = True
         self.update()
 
-    def updatePaintNode(self, old_node: QSGNode, _data: QQuickItem.UpdatePaintNodeData) -> QSGNode:
+    def updatePaintNode(self, old_node: QSGNode | None, _data: QQuickItem.UpdatePaintNodeData) -> QSGNode | None:
         # get dimensions in pixels
         W, H = int(self.width()), int(self.height())
         if W <= 0 or H <= 0:
@@ -150,39 +149,43 @@ class SmithTraceItem(QQuickItem):
         if self._dirty:
             # reset dirty flag
             self._dirty = False
-            # create transparent image and paint the grid onto it using QPainter; this is a CPU-based operation that generates a rasterized representation of the Smith chart grid, which can then be efficiently rendered by the GPU as a texture in subsequent frames
+            # create transparent image and paint the grid onto it using QPainter
             image = QImage(W, H, QImage.Format.Format_ARGB32_Premultiplied)
             image.fill(Qt.GlobalColor.transparent)
-            # calculate center and radius of the unit disk in pixel coordinates; the grid will be drawn within this disk, and the clipping region will ensure that any parts of the circles that extend beyond the unit disk are not rendered, creating the characteristic shape of the Smith chart
+            # calculate center and radius of the unit disk in pixel coordinates
             cx, cy = W / 2, H / 2
             R = min(W, H) / 2 * 0.90
-            # set up QPainter for anti-aliased drawing; this allows for smoother and visually appealing rendering of the circles and arcs that make up the Smith chart grid, at the cost of increased CPU time during the rasterization process, which is why we want to minimize how often this needs to be done by caching the resulting texture
+            # set up QPainter for anti-aliased drawing
             painter = QPainter(image)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            # clip traces to the unit disk
+            clip = QPainterPath()
+            clip.addEllipse(cx - R, cy - R, R * 2, R * 2)
+            painter.setClipPath(clip)
             # draw traces
             for pts_gamma, _, color in self._traces:
-                # skip if not enough points to draw a trace; this can happen when the trace is first added and the data is still being loaded or processed, allowing us to avoid unnecessary drawing operations and potential errors from trying to render incomplete data
+                # skip if not enough points to draw a trace
                 if pts_gamma is None or len(pts_gamma) < 2:
                     continue
-                # convert trace points from complex Γ coordinates to pixel coordinates; this involves mapping the complex plane of the Smith chart (where the real and imaginary parts of Γ correspond to the horizontal and vertical axes, respectively) to the pixel coordinate system of the image, taking into account the center and radius of the unit disk to ensure that the trace is accurately positioned on the chart
-                px = self._get_pixel_pts(pts_gamma, W, H, cx, cy, R)
+                # convert trace points from complex Γ coordinates to pixel coordinates
+                px = self._get_pixel_pts(pts_gamma, cx, cy, R)
                 n = len(px)
-                # set up pen for drawing the trace with the specified color and width; using a round cap style helps to create smoother endpoints for the trace, which can
+                # set up pen for drawing the trace with the specified color and width
                 pen = QPen(color, 2.0)
                 pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                 painter.setPen(pen)
-                # create a QPolygonF from the pixel coordinates of the trace points; this is a convenient way to represent the series of points that make up the trace, and it can be efficiently rendered as a connected series of line segments using QPainter's drawPolyline method, which is ideal for visualizing the continuous nature of the trace on the Smith chart
+                # create a QPolygonF from the pixel coordinates of the trace points
                 poly = QPolygonF([QPointF(float(px[i, 0]), float(px[i, 1])) for i in range(n)])
-                # draw the trace as a connected series of line segments defined by the points in the trace, which allows us to visualize the behavior of the impedance or reflection coefficient across the frequency range on the Smith chart; this is a key part of the visualization that helps users understand how their circuit behaves in terms of impedance matching and other RF characteristics
+                # draw the trace as a connected series of line segments
                 painter.drawPolyline(poly)
             # end QPainter
             painter.end()
             # delete old texture
             if self._texture:
                 self._texture.deleteLater()
-            # upload new texture to GPU; this is a one-time cost that can be expensive for large images
+            # upload new texture to GPU
             self._texture = self.window().createTextureFromImage(image)
-        # reuse existing node and texture since nothing changed; this allows for very fast rendering of the trace on top of the grid after the initial rasterization
+        # reuse existing node and texture since nothing changed
         node = old_node or QSGSimpleTextureNode()
         node.setTexture(self._texture)
         node.setRect(QRectF(0, 0, W, H))
@@ -190,23 +193,27 @@ class SmithTraceItem(QQuickItem):
         # exit
         return node
 
-    def _get_pixel_pts(self, pts_gamma, W, H, cx, cy, R):
-        # convert trace points from complex Γ coordinates to pixel coordinates; this involves mapping the complex plane of the Smith chart (where the real and imaginary parts of Γ correspond to the horizontal and vertical axes, respectively) to the pixel coordinate system of the image, taking into account the center and radius of the unit disk to ensure that the trace is accurately positioned on the chart; this transformation is essential for correctly rendering the trace on top of the grid, as it ensures that the points are placed in the correct locations relative to the underlying Smith chart structure
+    def _get_pixel_pts(self, pts_gamma: NDArray[np.float64], cx: float, cy: float, R: float) -> NDArray[np.float64]:
+        # convert trace points from complex Γ coordinates to pixel coordinates
         px = np.empty_like(pts_gamma)
         px[:, 0] = cx + pts_gamma[:, 0] * R
         px[:, 1] = cy - pts_gamma[:, 1] * R
-        # decimation using Ramer-Douglas-Peucker algorithm to reduce the number of points while preserving the overall shape of the trace; this is important for performance when rendering traces with a large number of points, as it allows us to significantly reduce the number of line segments that need to be drawn without losing important visual information about the trace's behavior
-        keep = decimate_xy(px, epsilon=1.0)
+        # decimation using Ramer-Douglas-Peucker algorithm to reduce the number of points while preserving the overall shape of the trace
+        x_dec, y_dec = decimate_xy(px[:, 0], px[:, 1], target=2000, algorithm=DecimationAlgorithm.RDP)
         # exit
-        return px[keep]
+        return np.column_stack((x_dec, y_dec))
 
     @Slot("QVariant")
-    def plot(self, series):
-        logger.debug("Plotting trace with %d points", len(series))
+    def plot(self, traces: list[tuple[NDArray[np.float64], str, QColor]]) -> None:
+        # update the list of traces and request a re-render
+        self._traces = traces
+        self._dirty = True
+        self.update()
+
 
 class SmithChartWindow(QMainWindow):
 
-    def __init__(self, qraw_file: QRawFile):
+    def __init__(self, qraw_file: QRawFile) -> None:
         super().__init__()
         # load and set the application icon
         icon = load_app_icon()
@@ -222,7 +229,7 @@ class SmithChartWindow(QMainWindow):
         self._selected_steps: set[int] = set(range(self._step_information.length))
         self._plot_suggestions = qraw_file.get_plot_suggestions()
         # current visualization state
-        self._expressions: dict[Expression, tuple[QColor]] = {}
+        self._expressions: dict[Expression, tuple[QColor, dict[int, np.ndarray]]] = {}
         # set window title to include the loaded filename
         self.setWindowTitle(f"{qraw_file.chart_type} - {qraw_file.filename.name}")
         # apply dark background stylesheet to the window chrome
@@ -235,14 +242,14 @@ class SmithChartWindow(QMainWindow):
         self._qml_view.setSource(QUrl.fromLocalFile(str(_QML_FILE)))
         # embed the single QWindow into the main window's central area
         self._container = QWidget.createWindowContainer(self._qml_view, self)
-        self.setCentralWidget(self._container)        
+        self.setCentralWidget(self._container)
         # next color index for new series
         self._next_color_index = 0
 
-    def sizeHint(self):
+    def sizeHint(self) -> QSize:
         return QSize(1200, 800)
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         # release application-level child window ownership when this window closes
         unregister_child_window(self)
         # delegate to the Qt base class when available
@@ -251,14 +258,14 @@ class SmithChartWindow(QMainWindow):
             close_event(event)
 
     @Slot(QQuickView.Status)
-    def _on_qml_ready(self, status: QQuickView.Status):
+    def _on_qml_ready(self, status: QQuickView.Status) -> None:
         # only proceed once QML has finished loading successfully
         if status != QQuickView.Status.Ready:
             return
         # qml view root object
         self._root = self._qml_view.rootObject()
         # set window-level menu capability flags using built-in bool to avoid passing numpy.bool into QML properties
-        self._root.setProperty("stepToolVisible", bool(self._step_information.length > 1))
+        self._root.setProperty("stepToolEnabled", bool(self._step_information.length > 1))
         # connect signals from QML to Python handlers
         self._root.menuAddRemovePlots.connect(self._on_menu_add_remove_plots)
         self._root.menuDeleteAllPlots.connect(self._on_menu_delete_all_plots)
@@ -270,10 +277,10 @@ class SmithChartWindow(QMainWindow):
             QTimer.singleShot(0, lambda: log_screen_info(self.screen()))
 
     @Slot()
-    def _on_menu_add_remove_plots(self):
+    def _on_menu_add_remove_plots(self) -> None:
         # log information
         logger.debug("User requested adding/removing plots on smith chart")
-        # open the add plot dialog, only show S11 and S22 expressions
+        # open the add plot dialog, only show complex expressions suitable for smith chart
         dialog = AddPlotDialog(self, self._expression_manager, list(self._expressions.keys()), allow_custom_expressions=False, expression_filter=lambda expression: expression.complex)
         # exit if the user cancelled
         if dialog.exec() != AddPlotDialog.DialogCode.Accepted:
@@ -282,14 +289,14 @@ class SmithChartWindow(QMainWindow):
         self._add_plots(dialog.selected_expressions)
 
     @Slot()
-    def _on_menu_delete_all_plots(self):
+    def _on_menu_delete_all_plots(self) -> None:
         # log information
         logger.debug("User requested deleting all plots on smith chart")
         # clear chart
         self._clear()
 
     @Slot()
-    def _on_menu_step_tool(self):
+    def _on_menu_step_tool(self) -> None:
         # log information
         logger.debug("User requested step tool on smith chart")
         # get selected steps for this chart, make a copy
@@ -301,10 +308,10 @@ class SmithChartWindow(QMainWindow):
             return
         # store selected steps for later filtering phase
         self._selected_steps = dialog.selected_steps
-        # auto range axes
-        # chart.auto_range()
+        # refresh plots
+        self._add_plots(set(self._expressions.keys()))
 
-    def _populate_charts(self):
+    def _populate_charts(self) -> None:
         # loop suggestions — each suggestion carries its own chart type
         for suggestion in self._plot_suggestions:
             # append plot
@@ -312,35 +319,76 @@ class SmithChartWindow(QMainWindow):
             # we are visualizing a single Smith Chart, so exit after the first suggestion (more than one expression is supported)
             break
 
-    def _add_plots(self, expressions: set[Expression]):
+    def _add_plots(self, expressions: set[Expression]) -> None:
+        # find the SmithTraceItem instance
+        trace_item = self._root.findChild(SmithTraceItem)
+        if not trace_item:
+            return
+        # 1. remove any expressions that are no longer selected for plotting
+        for expression in list(self._expressions.keys()):
+            if expression not in expressions:
+                # log information
+                logger.debug("Removing series for expression [%s] from Smith chart", expression.name)
+                # delete the expression
+                del self._expressions[expression]
+        # 2. loop expressions to update their per-step traces
+        for expression in expressions:
+            # lookup existing state or create new one
+            color, rendered_traces = self._expressions.get(expression, (None, {}))
+            # assign next color in palette if this is a new expression
+            if color is None:
+                # select color from palette
+                color = QColor(SERIES_COLOR_PALETTE[self._next_color_index % len(SERIES_COLOR_PALETTE)])
+                # increment color index
+                self._next_color_index += 1
+            # remove steps that are no longer selected
+            for step in list(rendered_traces.keys()):
+                # check step should be visible
+                if step not in self._selected_steps:
+                    # log information
+                    logger.debug("Removing trace for [%s], step: %d", expression.name, step)
+                    # remove step trace
+                    del rendered_traces[step]
+            # add missing steps that are now selected
+            for step in self._selected_steps:
+                # check step is not already rendered
+                if step in rendered_traces:
+                    continue
+                # step slice
+                step_slice = self._step_information.abscissa_indices[step]
+                # complex reflection coefficient data
+                data = expression.data[step_slice]
+                # filter non-finite values (Inf/NaN) to prevent rendering issues
+                finite_mask = np.isfinite(data)
+                if not np.all(finite_mask):
+                    data = data[finite_mask]
+                # skip if no valid data points to plot
+                if data.size == 0:
+                    continue
+                # convert to [re, im] columns
+                if expression.complex:
+                    gamma = np.column_stack((data.real, data.imag))
+                else:
+                    gamma = np.column_stack((data, np.zeros_like(data)))
+                # store rendered trace for this step
+                rendered_traces[step] = gamma
+            # update state
+            self._expressions[expression] = (color, rendered_traces)
+        # 3. collect all traces to be rendered in the SmithTraceItem
+        traces_to_render = []
+        # loop expressions and associated traces
+        for expression, (color, rendered_traces) in self._expressions.items():
+            # loop steps and associated rendered trace for this expression
+            for step, gamma in rendered_traces.items():
+                traces_to_render.append((gamma, f"{expression.name} (Step {step})", color))
+        # plot all traces on the Smith chart
+        QMetaObject.invokeMethod(trace_item, "plot", Q_ARG("QVariant", traces_to_render))
+
+    def _clear(self) -> None:
+        # clear internal state
+        self._expressions = {}
+        self._next_color_index = 0
         # find the SmithTraceItem instance
         trace_item = self._root.findChild(SmithTraceItem)
         if trace_item:
-            # remove any expressions that are no longer selected for plotting
-            for expression in list(self._expressions.keys()):
-                # check it not in set
-                if expression not in expressions:
-                    # log information
-                    logger.debug("Removing series for expression [%s] from Smith chart, steps: %s", expression.name, list(rendered_series.keys()))
-                    # remove from state
-                    del self._expressions[expression]
-            # loop expressions to plot
-            for expression in expressions:
-                # check we are already plotting this expression
-                if expression in self._expressions:
-                    continue
-                # assign next color in palette
-                color = QColor(SERIES_COLOR_PALETTE[self._next_color_index % len(SERIES_COLOR_PALETTE)])
-                # update index
-                self._next_color_index += 1
-
-                # loop steps
-                for step in self._selected_steps:
-                                    
-                # append to state
-                self._expressions[expression] = (color,)
-            # plot expressions
-            QMetaObject.invokeMethod(trace_item, "plot", Q_ARG("QVariant", self._expressions))
-
-    def _clear(self):
-        ...
+            QMetaObject.invokeMethod(trace_item, "plot", Q_ARG("QVariant", []))
