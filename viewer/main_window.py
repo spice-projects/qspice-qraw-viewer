@@ -418,7 +418,7 @@ class MainWindow(QMainWindow):
         # log information
         logger.debug("User requested Smith chart on chart at index: %d", chart_index)
         # filter expressions to those suitable for Smith charting (network parameters with complex data)
-        expressions = [expression for expression in self._expression_manager.expressions if expression.name.startswith(("S11", "S22")) and expression._variable_type == "parameter"]
+        expressions = [expression for expression in self._expression_manager.expressions if expression.name.startswith(("S11", "S22")) and expression.variable_type == "parameter"]
         # visualize the first expression
         plot_suggestion = f"\xab{expressions[0].name}\xbb" if expressions else ""
         # create expression manager
